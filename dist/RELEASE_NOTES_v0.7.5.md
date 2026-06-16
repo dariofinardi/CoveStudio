@@ -1,4 +1,4 @@
-# MikeRust v0.7.4 — Cross-dominio nell'editor dei workflow
+# MikeRust v0.7.5 — Cross-dominio nell'editor dei workflow
 
 Estende il meccanismo cross-dominio `also_applicable_to` — già
 disponibile per i preset di sistema in v0.7.3 — anche ai workflow
@@ -44,8 +44,8 @@ applicabili.
 
 ## Download
 
-- `MikeRust_0.7.4_x64.msi` — Windows x86_64
-- `MikeRust_0.7.4_arm64.msi` — Windows ARM64, Snapdragon X Elite
+- `MikeRust_0.7.5_x64.msi` — Windows x86_64
+- `MikeRust_0.7.5_arm64.msi` — Windows ARM64, Snapdragon X Elite
 
 Sostituzione drop-in per v0.7.3.
 

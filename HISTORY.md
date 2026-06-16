@@ -13,7 +13,10 @@ diff. For the upstream-sync audit trail (which fixes were ported from
 
 ---
 
-## v0.7.4 — 2026-06-14 (cross-dominio nell'editor dei workflow)
+## v0.7.5 — 2026-06-14 (cross-dominio nell'editor dei workflow)
+
+> Renumbered from v0.7.4 — a v0.7.4 release already exists on GitHub;
+> this work ships as v0.7.5 to avoid the clash.
 
 Extends the `also_applicable_to` cross-domain mechanism — shipped for
 built-in presets in v0.7.3 — to **user-created** workflows, so the
