@@ -154,8 +154,8 @@ comportamento dei workflow esistenti, che restano su un solo settore.
 
 | Architettura | File |
 |---|---|
-| Windows x86_64 | `CoveStudio_0.8.0_x64_en-US.msi` |
-| Windows ARM64 (Snapdragon X Elite) | `CoveStudio_0.8.0_arm64_en-US.msi` |
+| Windows x86_64 | `Cove Studio_0.8.0_x64.msi` |
+| Windows ARM64 (Snapdragon X Elite) | `Cove Studio_0.8.0_arm64.msi` |
 
 L'installer sostituisce MikeRust mantenendo i dati (stesso *upgrade
 code*): non disinstallare la versione precedente, né esportare nulla.
@@ -173,7 +173,7 @@ firma (vedi *Ringraziamenti* nel README); copyright e manutenzione del
 progetto restano di Dario Finardi. Per controllare:
 
 ```powershell
-Get-AuthenticodeSignature .\CoveStudio_0.8.0_arm64_en-US.msi |
+Get-AuthenticodeSignature ".\Cove Studio_0.8.0_arm64.msi" |
   Select-Object Status, @{n='Publisher';e={$_.SignerCertificate.Subject}}
 ```
 

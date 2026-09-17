@@ -57,7 +57,11 @@ param(
     [string]$Target = 'both',
     [switch]$Clean,
     [switch]$FrontendInstall,
-    [switch]$SkipNativeLibs
+    [switch]$SkipNativeLibs,
+    # Sign the application binary and the MSI with Azure Trusted
+    # Signing (see scripts/sign-windows.ps1). Requires `az login`.
+    # Without this switch the build produces unsigned artefacts.
+    [switch]$Sign
 )
 
 $ErrorActionPreference = 'Stop'
@@ -343,6 +347,38 @@ foreach ($arch in $archesToBuild) {
         }
     }
 
+    # Signing happens here, between the two phases: WiX packages the
+    # binary as it finds it, so the signature has to be on the file
+    # before the bundler runs. (Tauri's own `bundle.windows.signCommand`
+    # would sign at the right moment too, but it resolves the command
+    # against its own working directory and PATH — inside the
+    # VsDevCmd-primed subprocess that fails with a bare
+    # "failed to run powershell", which tells you nothing. Signing from
+    # here keeps the paths under our control.)
+    if ($Sign) {
+        $exe = Join-Path $releaseDir 'cove-studio.exe'
+        if (-not (Test-Path $exe)) { throw "Binary to sign not found: $exe" }
+        # sign-windows.ps1 throws on failure and $ErrorActionPreference
+        # is Stop, so no exit-code check: $LASTEXITCODE would carry the
+        # code of the last *native* command, not of the script.
+        & (Join-Path $PSScriptRoot 'sign-windows.ps1') $exe
+    }
+
+    # Stale MSIs from an earlier run must go before bundling: the
+    # collection step below takes every .msi it finds, so leaving one
+    # behind means copying an old installer into dist/ — and, with
+    # -Sign, signing it. A signed installer of a previous version
+    # sitting next to the current one is a publishing accident waiting
+    # to happen. (`-Clean` wipes the whole bundle dir; this runs
+    # always.)
+    $msiOutDir = Join-Path $bundleRoot 'msi'
+    if (Test-Path $msiOutDir) {
+        foreach ($old in @(Get-ChildItem -Path $msiOutDir -Filter '*.msi' -File)) {
+            Remove-Item -LiteralPath $old.FullName -Force
+            Write-Host ("Removed stale : {0}" -f $old.Name) -ForegroundColor DarkGray
+        }
+    }
+
     $cmdLineBundle = '"{0}" -arch={1} -host_arch={2} -no_logo && "{3}" build --config "{4}" --config "{5}" --target {6} --bundles msi' -f `
         $vsDev, $vsArchByArch[$arch], $hostArch, $tauriBin, $config, $overlay, $triple
 
@@ -373,6 +409,11 @@ foreach ($arch in $archesToBuild) {
         $destName = '{0}_{1}.msi' -f $cleanB, $arch
         $destPath = Join-Path -Path $distDir -ChildPath $destName
         Copy-Item -LiteralPath $msi.FullName -Destination $destPath -Force
+        # The copy in dist/ is what gets published, so that is the file
+        # that must carry the signature.
+        if ($Sign) {
+            & (Join-Path $PSScriptRoot 'sign-windows.ps1') $destPath
+        }
         Write-Host ('  -> dist\{0}' -f $destName) -ForegroundColor Green
         $built += $destPath
     }
