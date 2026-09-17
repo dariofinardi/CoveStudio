@@ -228,9 +228,25 @@ current `az login` session. It needs the Windows SDK signing tools, the
 `Microsoft.Trusted.Signing.Client` NuGet package expanded under
 `%LOCALAPPDATA%\TrustedSigningClient` (the script prints the two commands
 if it is missing), and an identity holding the *Trusted Signing
-Certificate Profile Signer* role on the signing account — without that
-role the service answers `403` at signing time. The dlib is x64-only, so
-the script picks the x64 `signtool` even on an ARM64 host.
+Certificate Profile Signer* role on the signing account. The dlib is
+x64-only, so the script picks the x64 `signtool` even on an ARM64 host.
+`bundle.windows.signCommand` calls the script during bundling, so the
+application binary is signed before it goes into the MSI, and the MSI is
+signed too.
+
+Two failure modes are worth knowing, because both look like a missing
+role:
+
+* **`403 Forbidden` at signing time.** The client authenticates with
+  `DefaultAzureCredential`, which tries Visual Studio, VS Code and Azure
+  PowerShell *before* the Azure CLI; if one of those is signed in with
+  another account, the service receives a valid token for an identity
+  without the signer role. The script's metadata therefore excludes
+  every credential except `AzureCliCredential`, tying signing to
+  `az login`.
+* **The first attempt after a pause fails.** The Azure CLI token is
+  renewed inside the client and the call in flight is lost; the script
+  retries three times with a growing pause.
 
 **ONNX Runtime version.** `ort` is built in `load-dynamic` mode and the
 vendored `onnxruntime.dll` must match the version `ort` was compiled

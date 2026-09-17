@@ -41,7 +41,8 @@
     "windows": {
       "wix": {
         "upgradeCode": "2f170911-2047-56b6-ac45-9f5b4dd5aaf0"
-      }
+      },
+      "signCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/sign-windows.ps1 \"%1\""
     }
   }
 }

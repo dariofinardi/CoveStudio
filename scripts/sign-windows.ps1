@@ -78,21 +78,45 @@ if (-not $signtool) {
 }
 
 # The dlib reads the account coordinates from a JSON file, not argv.
+#
+# ExcludeCredentials is not optional: the dlib authenticates with
+# DefaultAzureCredential, which tries Visual Studio, VS Code, Azure
+# PowerShell and others *before* the Azure CLI. If any of those is
+# signed in with a different account, the service gets a perfectly valid
+# token for an identity without the signer role and answers 403 — a
+# failure that looks exactly like a missing role assignment. Leaving
+# only AzureCliCredential ties signing to `az login` and nothing else.
 $metadata = Join-Path $env:TEMP 'cove-studio-trusted-signing.json'
 [ordered]@{
     Endpoint                 = $Endpoint
     CodeSigningAccountName   = $Account
     CertificateProfileName   = $Profile
-    CorrelationId            = ''
+    ExcludeCredentials       = @(
+        'EnvironmentCredential', 'WorkloadIdentityCredential',
+        'ManagedIdentityCredential', 'SharedTokenCacheCredential',
+        'VisualStudioCredential', 'VisualStudioCodeCredential',
+        'AzurePowerShellCredential', 'AzureDeveloperCliCredential',
+        'InteractiveBrowserCredential'
+    )
 } | ConvertTo-Json | Set-Content -Path $metadata -Encoding UTF8
 
 $failed = @()
 foreach ($item in $Path) {
     $file = (Resolve-Path -LiteralPath $item).Path
     Write-Host "Signing $file" -ForegroundColor Cyan
-    & $signtool sign /v /fd SHA256 /tr $TimestampUrl /td SHA256 `
-        /dlib $dlib /dmdf $metadata $file
-    if ($LASTEXITCODE -ne 0) {
+    # The first attempt after a period of inactivity fails regularly:
+    # the Azure CLI token is renewed inside the dlib and the call in
+    # flight is lost. Three attempts with a growing pause, then a real
+    # error.
+    $signed = $false
+    foreach ($attempt in 1..3) {
+        & $signtool sign /v /fd SHA256 /tr $TimestampUrl /td SHA256 `
+            /dlib $dlib /dmdf $metadata $file
+        if ($LASTEXITCODE -eq 0) { $signed = $true; break }
+        Write-Warning "Signing failed (attempt $attempt of 3): $file"
+        if ($attempt -lt 3) { Start-Sleep -Seconds (10 * $attempt) }
+    }
+    if (-not $signed) {
         $failed += $file
         continue
     }
