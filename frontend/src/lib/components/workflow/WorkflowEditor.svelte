@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Full-page workflow editor. Assistant workflows edit a Markdown prompt;
   tabular workflows edit a column table. Both auto-save (debounced).

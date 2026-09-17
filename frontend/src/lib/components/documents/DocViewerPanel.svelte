@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Document-viewer side panel: a resizable column on the right with one
   browser-style tab per opened document. Picks a renderer per file type

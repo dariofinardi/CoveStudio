@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Workflows screen — first real feature route. Lists DB workflows merged
   with shipped presets (GET /workflow), with tab filtering (all / built-in
@@ -6,6 +6,7 @@
   Create + edit modals land in a later phase.
 -->
 <script lang="ts">
+  import { PRODUCT_NAME } from '$lib/product'
   import Tabs from '$lib/components/ui/Tabs.svelte'
   import Badge from '$lib/components/ui/Badge.svelte'
   import Select from '$lib/components/ui/Select.svelte'
@@ -177,7 +178,7 @@
               <td class="px-3 py-2.5 text-(--color-text-secondary)">
                 {#if w.is_system}
                   <span class="inline-flex items-center gap-1.5">
-                    <Logo size={13} activity="idle" />MikeRust
+                    <Logo size={13} activity="idle" />{PRODUCT_NAME}
                   </span>
                 {:else}
                   {t('Workflows.originSelf')}

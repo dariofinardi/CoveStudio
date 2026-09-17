@@ -1,6 +1,6 @@
 //! Shared `reqwest::Client` factories with sane timeout defaults.
 //!
-//! Most of MikeRust's outbound HTTP — MCP probe / MCP dispatch, LLM
+//! Most of Cove Studio's outbound HTTP — MCP probe / MCP dispatch, LLM
 //! chat (non-streaming bits), corpus metadata fetches, EUR-Lex /
 //! Italian-legal / DILA poke endpoints — has no natural watchdog
 //! upstream of `reqwest`. A network partition or a slow remote

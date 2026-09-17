@@ -25,7 +25,7 @@ fn api_key(params: &StreamParams) -> Result<String> {
 /// (`<region>-aiplatform.googleapis.com/v1/projects/<proj>/locations/...`).
 ///
 /// We accept and persist the user's region preference via
-/// `params.gemini_region` so the choice survives MikeRust restarts and
+/// `params.gemini_region` so the choice survives Cove Studio restarts and
 /// is ready for the future Vertex integration, but for now we route
 /// every call to the global endpoint and log an info line when a
 /// non-global region is requested.
@@ -47,7 +47,7 @@ fn base_url(params: &StreamParams) -> String {
     )
 }
 
-/// Convert MikeRust messages into Gemini `contents` parts.
+/// Convert Cove Studio messages into Gemini `contents` parts.
 /// Roles: user → "user", assistant → "model".
 /// Tool calls (assistant.tool_calls) → `model` part with `functionCall`.
 /// Tool results (role=Tool) → `user` part with `functionResponse`.
@@ -112,7 +112,7 @@ fn to_wire_contents(messages: &[Message]) -> Vec<Value> {
 
 /// `safetySettings` payload turning OFF all four content filters.
 ///
-/// MikeRust is used on legal, insurance and PA workloads where the source
+/// Cove Studio is used on legal, insurance and PA workloads where the source
 /// material legitimately contains references to violence (sentences,
 /// claims), sexual content (employment-law / harassment cases), threats
 /// (anti-corruption files) and hate-speech evidence (discrimination
@@ -912,7 +912,7 @@ mod tests {
         // payload sections. Smoke-test on a request with both tools
         // and a system prompt.
         let mut p = empty_params("gemini-3.5-flash");
-        p.system_prompt = "you are mike".into();
+        p.system_prompt = "you are the assistant".into();
         p.tools = vec![crate::llm::types::ToolSchema {
             kind: "function".into(),
             function: crate::llm::types::ToolFunction {
@@ -925,7 +925,7 @@ mod tests {
         assert!(body["systemInstruction"]["parts"][0]["text"]
             .as_str()
             .unwrap()
-            .contains("you are mike"));
+            .contains("you are the assistant"));
         let fns = body["tools"][0]["function_declarations"].as_array().unwrap();
         assert_eq!(fns[0]["name"], "read_document");
         // And the new fields are still there.

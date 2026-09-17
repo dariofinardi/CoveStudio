@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Assistant screen — the active conversation. The chat history lives in
   the app sidebar; this screen is just the message stream + composer.

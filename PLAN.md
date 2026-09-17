@@ -1,12 +1,15 @@
-# MikeRust — Development Plan
+# Cove Studio — Development Plan
 
 > **Last updated:** May 2026 — consolidated document (the former `PLAN.md`
 > and `PLAN_MISSING.md` were merged here).
 >
-> **Purpose.** MikeRust is a clean-room rewrite of the
-> [willchen96/mike](https://github.com/willchen96/mike) project, geared toward
-> **local and sovereign** use: no cloud, no mandatory external service, a
-> single desktop executable. This document describes what MikeRust is, how it
+> **Purpose.** Cove Studio (formerly MikeRust) is a local desktop
+> assistant that started from the
+> [willchen96/mike](https://github.com/willchen96/mike) project and is geared
+> toward **local and sovereign** use: no cloud, no mandatory external service,
+> a single desktop executable. What is original and what still derives from
+> Mike is listed in the README section *Provenance and independence from
+> Mike*. This document describes what Cove Studio is, how it
 > is built, how it starts, and maintains the **functional specification** area
 > by area together with its progress status.
 >
@@ -21,7 +24,7 @@
 
 ---
 
-## 1. What MikeRust is
+## 1. What Cove Studio is
 
 A desktop-first, fully local AI assistant for documents. A single Tauri
 executable bundles: the axum backend, the SQLite database, the Svelte
@@ -39,10 +42,10 @@ management of projects with isolated knowledge bases.
 ## 2. Architecture
 
 ```text
-mike-tauri.exe  (single executable)
+cove-studio.exe  (single executable)
 ├── Tauri webview       ← shows the Svelte frontend (static build in frontend/dist/)
 └── tokio thread        ← axum on 127.0.0.1:<dynamic port> (loopback only)
-        ├── SQLite   (mike.db — zero setup, migrations applied automatically at startup)
+        ├── SQLite   (cove-studio.db — zero setup, migrations applied automatically at startup)
         ├── Auth     (Argon2id PIN + Windows Hello / Touch ID, opaque-token sessions)
         ├── Storage  (local filesystem, canonicalized path)
         ├── RAG      (ONNX embeddings via ort, local indexes)
@@ -61,9 +64,9 @@ webview as `api_base_url`. In standalone development it can be fixed via
 ## 3. Workspace structure
 
 ```text
-MikeRust/
+cove-studio/
 ├── Cargo.toml          ← workspace (members: "." and "src-tauri"), edition 2024
-├── src/                ← crate `mike` (library + standalone bin)
+├── src/                ← crate `cove-studio` (library + standalone bin)
 │   ├── lib.rs          ← run_server(port); exposes the axum app
 │   ├── main.rs         ← standalone bin (cargo run)
 │   ├── auth/           ← Argon2id PIN, biometrics, middleware, sessions, rate-limit
@@ -79,9 +82,9 @@ MikeRust/
 │   ├── corpora/        ← EUR-Lex, Italian Legal, manifest plugin adapter
 │   ├── sync/           ← local folder scanner → RAG index
 │   ├── embeddings/     ← ONNX model, sessions
-│   ├── mikeprj/        ← encrypted project export/import (.mikeprj)
+│   ├── project_archive/ ← encrypted project export/import (.coveprj)
 │   └── storage/        ← local filesystem
-├── src-tauri/          ← crate `mike-tauri` (desktop shell; depends on `mike`)
+├── src-tauri/          ← crate `cove-studio-desktop` (desktop shell; depends on `cove-studio`)
 │   ├── tauri.conf.json ← window, bundle, resources
 │   └── src/lib.rs      ← starts the axum thread + Tauri::Builder
 ├── frontend/           ← Svelte 5 + Vite 6 + Tailwind v4 frontend (TS strict)
@@ -120,7 +123,7 @@ cd frontend && pnpm dev   # Vite on :5173 — the package manager is pnpm, not n
 
 ```bash
 cd frontend && pnpm build   # svelte-check + vite build → frontend/dist/
-cargo tauri build           # builds mike-tauri.exe + installer
+cargo tauri build           # builds cove-studio.exe + installer
 ```
 
 ### Checks
@@ -139,12 +142,12 @@ cargo test --workspace          # Rust tests (unit + doc + integration)
 
 | Variable | Required | Default | Notes |
 |---|---|---|---|
-| `DATABASE_URL` | No | `sqlite://mike.db` | |
-| `STORAGE_PATH` | No | `./data/storage` | canonicalized at startup |
+| `DATABASE_URL` | No | `<home>/cove-studio-data/cove-studio.db` | |
+| `STORAGE_PATH` | No | `<home>/cove-studio-data/storage` | canonicalized at startup |
 | `PORT` | No | `0` (dynamic) | fix only for standalone dev |
 | `ANTHROPIC_API_KEY` / `GEMINI_API_KEY` / etc. | For LLM | — | normally keys are saved via `/user/llm-settings` |
 | `VLLM_BASE_URL` | For local LLM | — | OpenAI-compatible endpoint |
-| `MRUST_FORCE_MCP_TOOLS` | No | — | forces MCP tools to be enabled even on local models |
+| `COVE_FORCE_MCP_TOOLS` | No | — | forces MCP tools to be enabled even on local models |
 
 ### Frontend
 
@@ -177,7 +180,7 @@ standalone dev the frontend points to the backend via the known port.
 
 ## 8. Differences from the original Mike
 
-| Aspect | Mike (original) | MikeRust |
+| Aspect | Mike (original) | Cove Studio |
 |---|---|---|
 | Backend | Express + TypeScript | **Rust axum** |
 | Auth | Supabase Auth | **Argon2id PIN + Windows Hello / Touch ID** |
@@ -395,7 +398,7 @@ largest missing features.
 
 ### Expected behaviour
 
-> **License note.** This feature is a customization specific to MikeRust. It
+> **License note.** This feature is specific to Cove Studio. It
 > must be built with JS rendering libraries only (e.g. `pdf.js`), **without**
 > system plugins.
 
@@ -610,7 +613,7 @@ including `chat_id`, `chat_title`,
 ### Current state
 Working: list with search and domain filter, create/edit/delete (name,
 description, domain). **Missing**: detail view (clicking a row does nothing),
-document management, isolation modes, `.mikeprj` export/import, project chat,
+document management, isolation modes, `.coveprj` export/import, project chat,
 project review.
 
 ### Expected behaviour
@@ -650,11 +653,11 @@ project (according to the isolation mode).
 one with project scope (requires ≥ 1 ready document).
 
 **Project export.** A modal that asks for a recipient email and an "include the
-chats" checkbox. `POST /project/{id}/export` returns the encrypted `.mikeprj`
+chats" checkbox. `POST /project/{id}/export` returns the encrypted `.coveprj`
 binary, which is downloaded. The file is cryptographically bound to the
 recipient's email — only that person can import it.
 
-**Project import via drag & drop.** Dragging a `.mikeprj` file onto the
+**Project import via drag & drop.** Dragging a `.coveprj` file onto the
 projects page shows a drop overlay; on drop, a confirmation window asks for the
 recipient email (the file is encrypted, bound to that email).
 `POST /project/import` imports it and navigates to the new project.
@@ -669,7 +672,7 @@ editability of the isolation mode (currently absent from the modal).
 4. Assistant tab with project chat at project RAG scope.
 5. Review tab with project-scoped reviews.
 6. RAG isolation toggle (owner only).
-7. `.mikeprj` export modal and drag-&-drop import flow with email confirmation.
+7. `.coveprj` export modal and drag-&-drop import flow with email confirmation.
 8. Extension of the project modal (case number, isolation mode).
 
 ---

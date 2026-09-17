@@ -49,6 +49,8 @@ pub fn router() -> Router<Arc<AppState>> {
             "/local-secure/uninstall/{model_id}",
             delete(local_secure_uninstall),
         )
+        .route("/local-secure/migrate", axum::routing::post(local_secure_migrate))
+        .route("/local-secure/remove-legacy", axum::routing::post(local_secure_remove_legacy))
         .route("/account", delete(delete_account))
         .route("/mcp-servers", get(list_mcp_servers).post(upsert_mcp_server))
         .route("/mcp-servers/probe", axum::routing::post(probe_mcp_server))
@@ -389,9 +391,8 @@ pub struct LlmSettings {
     /// because the technique adds one extra LLM call per chat turn.
     pub hyde_enabled: bool,
     /// "Modalità sicura locale" — when ON the local provider only
-    /// talks to loopback and only accepts the curated `mike-…-fast`
-    /// model ids defined in
-    /// [`crate::llm::ollama_manager::CURATED_MODELS`]. Persisted in
+    /// talks to loopback and only accepts the models of the local-models
+    /// catalogue (`config/local-models/ollama.json`). Persisted in
     /// `user_settings.local_secure_mode` (migration 0032). Toggled
     /// from Settings → Modelli LLM. Default OFF for retro-compat on
     /// existing installs.
@@ -865,7 +866,7 @@ async fn probe_mcp_server(
         "params": {
             "protocolVersion": "2024-11-05",
             "capabilities": {},
-            "clientInfo": { "name": "MikeRust", "version": "0.1" }
+            "clientInfo": { "name": crate::product::NAME, "version": env!("CARGO_PKG_VERSION") }
         }
     });
 
@@ -1263,20 +1264,16 @@ async fn delete_mcp_server(
 }
 
 // ---------------------------------------------------------------------------
-// /user/local-secure/*  — v0.5.6 "Modalità sicura locale" plug-and-play
+// /user/local-secure/*  — "Modalità sicura locale"
 //
-// Backs the Settings → Modelli LLM section that ships with the v0.5.6
-// "Modalità sicura locale" toggle. The frontend hits these endpoints
-// to (a) detect whether Ollama is reachable on loopback before
-// surfacing the curated catalogue, (b) enumerate the curated catalogue
-// alongside which entries are already installed, and (c) idempotently
-// install / uninstall a curated entry with real-time progress.
+// Backs Settings → Modelli LLM in secure mode: (a) is Ollama reachable on
+// loopback, (b) the local-models catalogue with installed / legacy state,
+// (c) install / uninstall with streamed progress, (d) migration of models
+// created under names from earlier releases and, only after the user
+// agrees in the UI, removal of those old names.
 //
-// All four endpoints sit behind the standard auth middleware — they
-// don't touch any user-scoped DB state, but they talk to the Ollama
-// process on the host so we still require an authenticated session
-// (otherwise an unauth caller could drive arbitrary `ollama pull` /
-// `ollama delete` operations against the localhost server).
+// Every endpoint requires an authenticated session: they drive the Ollama
+// process on the host (pull, copy, delete).
 // ---------------------------------------------------------------------------
 async fn local_secure_heartbeat(_auth: AuthUser) -> Json<Value> {
     let alive = crate::llm::ollama_manager::heartbeat().await;
@@ -1287,51 +1284,33 @@ async fn local_secure_heartbeat(_auth: AuthUser) -> Json<Value> {
 }
 
 async fn local_secure_models(_auth: AuthUser) -> Json<Value> {
-    // The curated catalogue is static; the "installed" flag is the
-    // only live bit. If Ollama isn't reachable we still return the
-    // catalogue so the UI can render the offline state without a
-    // separate round-trip.
-    let installed = crate::llm::ollama_manager::list_installed()
-        .await
-        .unwrap_or_default();
-    // Normalise: Ollama appends `:latest` to any model created or pulled
-    // without an explicit tag (this is what bit us on 2026-06-07:
-    // `ollama create mike-qwen35-4b-fast` lands as
-    // `mike-qwen35-4b-fast:latest`, the bare id never appears in
-    // `ollama list`, so the previous contains check missed every
-    // variant the user actually installed and the UI kept showing
-    // "Installa"). Strip the suffix here and accept both shapes in the
-    // helper below.
-    let installed_set: std::collections::HashSet<String> = installed
-        .iter()
-        .map(|s| {
-            s.strip_suffix(":latest")
-                .map(|x| x.to_string())
-                .unwrap_or_else(|| s.clone())
-        })
-        .collect();
-    let is_installed = |name: &str| -> bool {
-        installed_set.contains(name) || installed_set.contains(&format!("{name}:latest"))
-    };
-    let models: Vec<Value> = crate::llm::ollama_manager::CURATED_MODELS
+    use crate::llm::ollama_manager::{find_legacy_installs, is_installed, list_installed};
+
+    // Without Ollama the catalogue is still returned, so the UI can show
+    // the offline state without another round-trip.
+    let installed = list_installed().await.unwrap_or_default();
+    let catalogue = crate::presets::local_models::catalogue();
+    let legacy = find_legacy_installs(&crate::presets::local_models::name_migrations(), &installed);
+
+    let models: Vec<Value> = catalogue
         .iter()
         .map(|m| {
+            let legacy_installed: Vec<&str> = legacy
+                .iter()
+                .filter(|l| l.current_name == m.id)
+                .map(|l| l.installed_name.as_str())
+                .collect();
             json!({
                 "id": m.id,
                 "base_model": m.base_model,
                 "display_name": m.display_name,
                 "approx_size_gb": m.approx_size_gb,
                 "min_ram_gb": m.min_ram_gb,
-                // "ready" means the mike-…-fast Modelfile derivation
-                // exists. The BASE model alone isn't enough — the
-                // user gets the suppressed-thinking behaviour only
-                // when the derivation is in place.
-                "ready": is_installed(m.id),
-                // "base_present" lets the UI surface "Pull skipped —
-                // base already on disk, only creating the wrapper"
-                // when the user re-installs after deleting only the
-                // wrapper.
-                "base_present": is_installed(m.base_model),
+                // The derivation exists: the base model alone does not
+                // give the configured behaviour.
+                "ready": is_installed(&installed, &m.id),
+                "base_present": is_installed(&installed, &m.base_model),
+                "legacy_installed": legacy_installed,
             })
         })
         .collect();
@@ -1339,52 +1318,113 @@ async fn local_secure_models(_auth: AuthUser) -> Json<Value> {
 }
 
 async fn local_secure_ensure(
+    State(state): State<Arc<AppState>>,
     _auth: AuthUser,
     Path(model_id): Path<String>,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
-    // Reject unknown ids before we even talk to Ollama — keeps the
-    // SSE stream short and surfaces the error in a single chunk.
-    if crate::llm::ollama_manager::find_curated(&model_id).is_none() {
-        let stream = futures_util::stream::once(async move {
-            let payload = json!({
-                "phase": "error",
-                "message": format!("Modello non in allowlist: {model_id}")
-            });
-            Ok::<SseEvent, Infallible>(
-                SseEvent::default().json_data(payload).unwrap_or_default(),
-            )
-        })
-        .boxed();
-        return Sse::new(stream)
-            .keep_alive(KeepAlive::default())
-            .into_response();
+
+    let to_sse = |value: Value| {
+        Ok::<SseEvent, Infallible>(SseEvent::default().json_data(value).unwrap_or_default())
+    };
+
+    if crate::presets::local_models::find(&model_id).is_none() {
+        let payload = json!({ "phase": "error", "message": format!("Modello non in catalogo: {model_id}") });
+        let stream = futures_util::stream::once(async move { to_sse(payload) }).boxed();
+        return Sse::new(stream).keep_alive(KeepAlive::default()).into_response();
     }
 
-    let raw = crate::llm::ollama_manager::ensure_curated(model_id);
-    let sse_stream = raw
-        .map(|event| {
-            let value = serde_json::to_value(&event).unwrap_or_else(
-                |_| json!({"phase": "error", "message": "serialise failed"}),
-            );
-            Ok::<SseEvent, Infallible>(
-                SseEvent::default().json_data(value).unwrap_or_default(),
-            )
+    // When the model is ready, settings that still point at one of its
+    // legacy names are moved to the current name.
+    let sse_stream = crate::llm::ollama_manager::ensure(model_id)
+        .then(move |event| {
+            let state = state.clone();
+            async move {
+                if let crate::llm::ollama_manager::EnsureEvent::Ready { model_id } = &event {
+                    for migration in crate::presets::local_models::name_migrations()
+                        .into_iter()
+                        .filter(|m| &m.current == model_id)
+                    {
+                        rewrite_legacy_model_settings(&state, &migration.legacy, &migration.current).await;
+                    }
+                }
+                to_sse(serde_json::to_value(&event).unwrap_or_else(
+                    |_| json!({"phase": "error", "message": "serialise failed"}),
+                ))
+            }
         })
         .boxed();
-    Sse::new(sse_stream)
-        .keep_alive(KeepAlive::default())
-        .into_response()
+    Sse::new(sse_stream).keep_alive(KeepAlive::default()).into_response()
 }
 
-async fn local_secure_uninstall(
-    _auth: AuthUser,
-    Path(model_id): Path<String>,
-) -> ApiResult {
-    crate::llm::ollama_manager::uninstall_curated(&model_id)
+async fn local_secure_uninstall(_auth: AuthUser, Path(model_id): Path<String>) -> ApiResult {
+    crate::llm::ollama_manager::uninstall(&model_id)
         .await
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// Copies models installed under legacy names to their current names
+/// (no download, nothing deleted) and updates the settings that referred
+/// to the old names. The response lists what still needs the user: names
+/// that can be removed and models that must be installed again.
+async fn local_secure_migrate(State(state): State<Arc<AppState>>, _auth: AuthUser) -> ApiResult {
+    let report = crate::llm::ollama_manager::migrate_legacy()
+        .await
+        .map_err(|e| err(StatusCode::BAD_GATEWAY, &e.to_string()))?;
+    for renamed in &report.migrated {
+        rewrite_legacy_model_settings(&state, &renamed.from, &renamed.to).await;
+    }
+    Ok(Json(serde_json::to_value(&report).unwrap_or_else(|_| json!({}))))
+}
+
+#[derive(Deserialize)]
+struct RemoveLegacyBody {
+    names: Vec<String>,
+}
+
+/// Removes legacy model names from Ollama. Called by the UI only after the
+/// user has confirmed; names that are not legacy catalogue ids are refused.
+async fn local_secure_remove_legacy(_auth: AuthUser, Json(body): Json<RemoveLegacyBody>) -> ApiResult {
+    let removed = crate::llm::ollama_manager::remove_legacy(&body.names)
+        .await
+        .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
+    Ok(Json(json!({ "removed": removed })))
+}
+
+/// Points every settings column that references `legacy` at `current`.
+/// `local_model` stores the bare name; the role columns store it with the
+/// `local:` dispatch prefix. The installed name may carry `:latest`.
+async fn rewrite_legacy_model_settings(state: &AppState, legacy: &str, current: &str) {
+    let legacy = legacy.strip_suffix(":latest").unwrap_or(legacy);
+    let current = current.strip_suffix(":latest").unwrap_or(current);
+    let bare = [legacy.to_string(), format!("{legacy}:latest")];
+    let prefixed = [format!("local:{legacy}"), format!("local:{legacy}:latest")];
+    let current_prefixed = format!("local:{current}");
+
+    let updates: [(&str, &str, &[String; 2]); 4] = [
+        ("local_model", current, &bare),
+        ("main_model", current_prefixed.as_str(), &prefixed),
+        ("title_model", current_prefixed.as_str(), &prefixed),
+        ("tabular_model", current_prefixed.as_str(), &prefixed),
+    ];
+    for (column, value, old) in updates {
+        let sql = format!("UPDATE user_settings SET {column} = ? WHERE {column} IN (?, ?)");
+        match sqlx::query(&sql)
+            .bind(value)
+            .bind(&old[0])
+            .bind(&old[1])
+            .execute(&state.db)
+            .await
+        {
+            Ok(r) if r.rows_affected() > 0 => tracing::info!(
+                "[local-secure] settings.{column}: {} row(s) moved from {legacy} to {current}",
+                r.rows_affected()
+            ),
+            Ok(_) => {}
+            Err(e) => tracing::warn!("[local-secure] settings.{column} update failed: {e}"),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

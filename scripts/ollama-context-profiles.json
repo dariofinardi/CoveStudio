@@ -2,19 +2,19 @@
   "profiles": [
     {
       "base_model": "qwen3.5:4b",
-      "alias_model": "mikerust-qwen35-4b:ctx16k",
+      "alias_model": "covestudio-qwen35-4b:ctx16k",
       "num_ctx": 16384,
       "note": "Smoke/interactive profile on Snapdragon X Elite"
     },
     {
       "base_model": "qwen3.5:9b",
-      "alias_model": "mikerust-qwen35-9b:ctx8k",
+      "alias_model": "covestudio-qwen35-9b:ctx8k",
       "num_ctx": 8192,
       "note": "Balanced profile to reduce memory pressure"
     },
     {
       "base_model": "gemma4:e2b",
-      "alias_model": "mikerust-gemma4-e2b:ctx8k",
+      "alias_model": "covestudio-gemma4-e2b:ctx8k",
       "num_ctx": 8192,
       "note": "Conservative profile for 16GB unified memory systems"
     }

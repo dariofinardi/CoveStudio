@@ -32,18 +32,13 @@ use fastembed::{
     UserDefinedEmbeddingModel,
 };
 
-/// Resolve a cached model directory under `<USERPROFILE>/mikerust-data/
-/// fastembed/<subdir>/`. Skips the test (via `Result<…, &'static str>`)
+/// Resolve a cached model directory under the product data folder
+/// (`fastembed/<subdir>/`). Skips the test (via `Result<…, &'static str>`)
 /// when the directory is missing so the test is a no-op on machines
 /// that haven't downloaded the model yet.
 fn cache_dir(subdir: &str) -> Result<PathBuf, &'static str> {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map_err(|_| "no USERPROFILE or HOME env var")?;
-    let p = PathBuf::from(home)
-        .join("mikerust-data")
-        .join("fastembed")
-        .join(subdir);
+    cove_studio::product::home_dir().ok_or("no USERPROFILE or HOME env var")?;
+    let p: PathBuf = cove_studio::product::data_subdir("fastembed").join(subdir);
     if !p.is_dir() {
         return Err("cache dir not present — run the app once to download the model");
     }
@@ -252,7 +247,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 #[test]
 #[ignore = "loads heavy models; run on-demand with --ignored --nocapture"]
 fn perf_fp32_intfloat() {
-    let dir = match cache_dir("mike-e5-base") {
+    let dir = match cache_dir("e5-base") {
         Ok(d) => d,
         Err(e) => {
             eprintln!("[SKIP FP32] {e}");
@@ -265,7 +260,7 @@ fn perf_fp32_intfloat() {
 #[test]
 #[ignore = "loads heavy models; run on-demand with --ignored --nocapture"]
 fn perf_int8_xenova() {
-    let dir = match cache_dir("mike-e5-base-quantized") {
+    let dir = match cache_dir("e5-base-quantized") {
         Ok(d) => d,
         Err(e) => {
             eprintln!("[SKIP INT8] {e}");
@@ -300,11 +295,11 @@ fn perf_int8_xenova() {
 #[test]
 #[ignore = "loads both FP32 and INT8 models (~1.3 GB RAM); --ignored --nocapture"]
 fn quality_fp32_vs_int8() {
-    let fp32_dir = match cache_dir("mike-e5-base") {
+    let fp32_dir = match cache_dir("e5-base") {
         Ok(d) => d,
         Err(e) => { eprintln!("[SKIP QUALITY] FP32 cache: {e}"); return; }
     };
-    let int8_dir = match cache_dir("mike-e5-base-quantized") {
+    let int8_dir = match cache_dir("e5-base-quantized") {
         Ok(d) => d,
         Err(e) => { eprintln!("[SKIP QUALITY] INT8 cache: {e}"); return; }
     };

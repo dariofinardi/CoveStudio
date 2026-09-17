@@ -1,6 +1,6 @@
 # EUR-Lex — registrazione e modalità di accesso
 
-MikeRust V1 supporta EUR-Lex **senza alcuna registrazione**: il connettore scarica il testo HTML direttamente dall'endpoint pubblico `https://eur-lex.europa.eu/legal-content/{LANG}/TXT/HTML/?uri=CELEX:{celex}`. Questo basta per indicizzare un atto specifico tramite il suo **codice CELEX** (es. `32016R0679` per il GDPR) in una qualsiasi delle 24 lingue UE, con fallback automatico sull'inglese se l'atto non è disponibile nella lingua scelta.
+Cove Studio V1 supporta EUR-Lex **senza alcuna registrazione**: il connettore scarica il testo HTML direttamente dall'endpoint pubblico `https://eur-lex.europa.eu/legal-content/{LANG}/TXT/HTML/?uri=CELEX:{celex}`. Questo basta per indicizzare un atto specifico tramite il suo **codice CELEX** (es. `32016R0679` per il GDPR) in una qualsiasi delle 24 lingue UE, con fallback automatico sull'inglese se l'atto non è disponibile nella lingua scelta.
 
 ## Quando serve registrarsi
 
@@ -60,4 +60,4 @@ L'uso e il riuso dei contenuti EUR-Lex è disciplinato dalla **Decisione 2011/83
 - ✅ V1 — fetch CELEX-based con HTML scraping, fallback EN, indicizzazione nel pool RAG globale dell'utente.
 - 🔲 V2 — registrazione al SOAP CWS, ricerca full-text + filtri EuroVoc, paginazione risultati.
 - 🔲 V2.5 — arricchimento metadati via SPARQL (ELI, riferimenti incrociati, gerarchia normativa).
-- 🔲 V3 — sincronizzazione differenziale: l'utente sottoscrive una "watch list" CELEX e MikeRust ricontrolla periodicamente le versioni consolidate.
+- 🔲 V3 — sincronizzazione differenziale: l'utente sottoscrive una "watch list" CELEX e Cove Studio ricontrolla periodicamente le versioni consolidate.

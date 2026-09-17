@@ -1,9 +1,10 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Authenticated app shell: sidebar (nav + collapsible chat list +
   pinned Settings) + topbar + the active feature route.
 -->
 <script lang="ts">
+  import { PRODUCT_NAME } from '$lib/product'
   import { tick } from 'svelte'
   import AppShell from '$lib/components/layout/AppShell.svelte'
   import Sidebar from '$lib/components/layout/Sidebar.svelte'
@@ -71,7 +72,7 @@
     settings: 'Common.settings',
   }
   const activeLabel = $derived(
-    titleByRoute[router.current] ? i18n.t(titleByRoute[router.current]) : 'MikeRust'
+    titleByRoute[router.current] ? i18n.t(titleByRoute[router.current]) : PRODUCT_NAME
   )
 
   const greetingName = $derived(
@@ -250,10 +251,10 @@
     <Sidebar>
       {#snippet brand()}
         <div class="flex items-center gap-2 w-full">
-          <Logo size={20} activity="idle" />
-          <span class="text-base font-semibold text-(--color-brand-600)">MikeRust</span>
+          <Logo size={18} activity="idle" class="shrink-0" />
+          <span class="text-sm font-semibold whitespace-nowrap shrink-0 text-(--color-brand-600)">{PRODUCT_NAME}</span>
           <span
-            class="text-[11px] font-normal text-(--color-text-secondary) tabular-nums"
+            class="text-[11px] font-normal whitespace-nowrap shrink-0 text-(--color-text-secondary) tabular-nums"
             title={i18n.t('App.versionTooltip', { version: APP_VERSION })}
           >
             v{APP_VERSION}

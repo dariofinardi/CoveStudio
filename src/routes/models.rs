@@ -26,6 +26,66 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", get(list_models))
         .route("/local/probe", get(probe_local_models))
+        .route("/context-window", get(context_window))
+}
+
+#[derive(Debug, Deserialize)]
+struct ContextWindowQuery {
+    /// Model id as stored in the settings (`claude-…`, `openai:…`,
+    /// `mistral:…`, `local:…`).
+    model: String,
+    /// Local base URL typed in the form but not saved yet; defaults to the
+    /// saved settings.
+    #[serde(default)]
+    base_url: Option<String>,
+    /// Secure local mode as shown in the form; defaults to the saved value.
+    #[serde(default)]
+    secure: Option<bool>,
+}
+
+/// Context window of a model, for the Settings page: for local Ollama
+/// models the value comes from the server, otherwise from the catalogue or
+/// the built-in estimate. The response says which, and for Ollama also
+/// whether the model is loaded, the Modelfile `num_ctx` and the model's
+/// maximum.
+async fn context_window(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Query(q): Query<ContextWindowQuery>,
+) -> ApiResult {
+    let model = q.model.trim();
+    if model.is_empty() {
+        return Err((StatusCode::BAD_REQUEST, Json(json!({ "error": "model is required" }))));
+    }
+    let settings = crate::routes::user::fetch_llm_settings(&state.db, &auth.user_id).await.ok();
+    let mut local = if model.starts_with("local:") {
+        crate::routes::chat::build_local_config(model, settings.as_ref()).or_else(|| {
+            q.base_url.as_ref().map(|base| crate::llm::types::LocalConfig {
+                base_url: base.clone(),
+                api_key: None,
+                model: model.trim_start_matches("local:").to_string(),
+                secure_mode: q.secure.unwrap_or(false),
+            })
+        })
+    } else {
+        None
+    };
+    if let Some(cfg) = local.as_mut() {
+        if let Some(base) = q.base_url.as_ref().filter(|b| !b.trim().is_empty()) {
+            cfg.base_url = base.clone();
+        }
+        if let Some(secure) = q.secure {
+            cfg.secure_mode = secure;
+        }
+        cfg.model = model.trim_start_matches("local:").to_string();
+    }
+    let report = crate::llm::context_window::describe(
+        model,
+        local.as_ref(),
+        Some(state.model_catalogue.as_ref()),
+    )
+    .await;
+    Ok(Json(json!({ "model": model, "report": report })))
 }
 
 async fn list_models(
@@ -57,7 +117,7 @@ struct LocalProbeQuery {
 /// `Access-Control-Allow-Origin: http://tauri.localhost`, so the
 /// browser blocked the request with the "No 'Access-Control-Allow-
 /// Origin' header is present" message users reported in
-/// mike-tauri.log.
+/// cove-studio.log.
 ///
 /// Running the request from the backend sidesteps CORS entirely
 /// (server-to-server fetch, no Origin header involved). We also

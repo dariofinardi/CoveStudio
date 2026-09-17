@@ -1,7 +1,7 @@
 //! Italian-legal-corpus connector.
 //!
 //! Bridges the `dossier-legal/italian-legal-corpus` HuggingFace
-//! dataset (CC-BY-4.0, snapshot 2026-03-01) into MikeRust's RAG store.
+//! dataset (CC-BY-4.0, snapshot 2026-03-01) into Cove Studio's RAG store.
 //!
 //! Two phases:
 //!
@@ -165,9 +165,7 @@ pub async fn run_import(db: Arc<SqlitePool>) -> Result<()> {
         .await?;
 
     let client = reqwest::Client::builder()
-        .user_agent(
-            "MikeRust/0.1 (italian-legal-corpus importer; +https://github.com/)",
-        )
+        .user_agent(crate::product::user_agent(Some("italian-legal-corpus importer")))
         .timeout(std::time::Duration::from_secs(300))
         .build()?;
 

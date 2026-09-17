@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 /**
  * Light / dark / system theme (plan §4).
@@ -13,9 +13,11 @@
  * desktop), not portable account data — so it does not belong on a
  * /user/* endpoint. The value is non-sensitive.
  */
+import { readLocalPreference, writeLocalPreference } from '$lib/product'
+
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const STORAGE_KEY = 'mikerust.theme'
+const PREFERENCE_NAME = 'theme'
 const MODES: ThemeMode[] = ['light', 'dark', 'system']
 
 function isThemeMode(v: unknown): v is ThemeMode {
@@ -38,23 +40,15 @@ function createThemeStore() {
 
     /** Read the persisted choice and apply it. Call once at startup. */
     init() {
-      try {
-        const saved = localStorage.getItem(STORAGE_KEY)
-        if (isThemeMode(saved)) mode = saved
-      } catch {
-        // localStorage unavailable — fall back to 'system'
-      }
+      const saved = readLocalPreference(PREFERENCE_NAME)
+      if (isThemeMode(saved)) mode = saved
       applyClass()
     },
 
     set(next: ThemeMode) {
       mode = next
       applyClass()
-      try {
-        localStorage.setItem(STORAGE_KEY, next)
-      } catch {
-        // non-fatal — the in-memory choice still applies this session
-      }
+      writeLocalPreference(PREFERENCE_NAME, next)
     },
   }
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 import { invoke } from '@tauri-apps/api/core'
 
@@ -7,7 +7,7 @@ import { invoke } from '@tauri-apps/api/core'
  *
  * The Tauri shell spawns the backend on a free port at startup and reports
  * it back via the `api_base_url` command. The first `invoke` can race the
- * backend startup: the WebView boots in ~100ms but mike's AppState (81
+ * backend startup: the WebView boots in ~100ms but the backend's AppState (81
  * workflow presets + 30 column presets + 13 docx templates + 5 model
  * providers + DB migrations + ort init) takes ~1s to settle before
  * `port_tx` fires. In that window the command returns an empty string and
@@ -58,7 +58,7 @@ export async function openExternal(url: string): Promise<void> {
 /**
  * Open a *file path* with the OS's default associated application.
  * Backed by the `open_external_path` Tauri command, which validates
- * the path against the user's MikeRust storage root before launching
+ * the path against the user's Cove Studio storage root before launching
  * — see src-tauri/src/lib.rs for the security model. Used by the
  * DocViewerPanel "Open in Word" button so the user can run Word's
  * native track-changes accept/reject workflow on a model-generated

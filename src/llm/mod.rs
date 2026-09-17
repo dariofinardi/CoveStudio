@@ -6,6 +6,7 @@ pub mod ollama_manager;
 pub mod mistral;
 pub mod builtin_tools;
 pub mod summarize;
+pub mod context_window;
 pub mod hyde;
 
 pub use types::*;
@@ -57,7 +58,7 @@ pub fn strip_model_prefix(model: &str) -> &str {
 
 /// Best-effort detection of models that handle a long `tools` schema
 /// reliably. Used by the chat dispatcher to decide whether to inject
-/// **MCP** tool schemas alongside the always-on Mike builtins.
+/// **MCP** tool schemas alongside the always-on builtin tools.
 ///
 /// Gating here is conservative on purpose:
 ///   - Big-3 cloud models (Claude / Gemini / GPT) — yes. Their
@@ -69,7 +70,7 @@ pub fn strip_model_prefix(model: &str) -> &str {
 ///     llama.cpp models (3B-13B) that get distracted by long tool
 ///     schemas; we observed gemma3 and llama3.2:3b in particular
 ///     emit malformed JSON when given >5 tools. Power users can
-///     opt in via the `MRUST_FORCE_MCP_TOOLS=1` env override.
+///     opt in via the `COVE_FORCE_MCP_TOOLS=1` env override.
 ///   - Unknown / unconfigured — no, fail closed.
 ///
 /// The system prompt always summarises MCP servers as text (see
@@ -77,7 +78,7 @@ pub fn strip_model_prefix(model: &str) -> &str {
 /// that doesn't get the tool schemas still knows the servers exist
 /// and can ask the user to invoke them.
 pub fn supports_mcp_tools(model: &str) -> bool {
-    if std::env::var("MRUST_FORCE_MCP_TOOLS")
+    if crate::product::env_var("FORCE_MCP_TOOLS")
         .map(|v| matches!(v.trim(), "1" | "true" | "yes"))
         .unwrap_or(false)
     {
@@ -192,15 +193,15 @@ mod tests {
 
     #[test]
     fn supports_mcp_tools_capability_table() {
-        // All three groups mutate the process-global MRUST_FORCE_MCP_TOOLS
+        // All three groups mutate the process-global COVE_FORCE_MCP_TOOLS
         // env var, so they live in one test: split across separate #[test]s
         // they race under the parallel test runner.
 
         // Force override ON: even local/unknown models report true.
-        unsafe { std::env::set_var("MRUST_FORCE_MCP_TOOLS", "1") };
+        unsafe { std::env::set_var(crate::product::env_var_name("FORCE_MCP_TOOLS"), "1") };
         assert!(supports_mcp_tools("local:gemma3"));
         assert!(supports_mcp_tools("foobar-7b"));
-        unsafe { std::env::remove_var("MRUST_FORCE_MCP_TOOLS") };
+        unsafe { std::env::remove_var(crate::product::env_var_name("FORCE_MCP_TOOLS")) };
 
         // Default table: known cloud models report true.
         assert!(supports_mcp_tools("claude-opus-4-7"));

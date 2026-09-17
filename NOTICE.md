@@ -1,71 +1,61 @@
-# Notice — trademarks and brand assets
+# Notice — licensing, names and trademarks
 
-The source code of MikeRust is distributed under the AGPL-3.0
-license (see [LICENSE](LICENSE)). This file clarifies what is **not**
-covered by that license, to prevent confusion when the project is
-forked or redistributed.
+## Code licence
 
-## Trademarks
+Cove Studio is distributed under the GNU Affero General Public License,
+version 3 only (AGPL-3.0-only); see [LICENSE](LICENSE).
 
-The following names and visual marks are **trademarks of Semplifica
-s.r.l.**, and are **not** licensed under AGPL-3.0:
+- **Original work** — Copyright © 2026 Dario Finardi.
+- **Parts derived from Mike** — Copyright © Will Chen and the contributors
+  of [`willchen96/mike`](https://github.com/willchen96/mike), AGPL-3.0.
+  They are listed in the README section
+  [Provenance and independence from Mike](README.md#provenance-and-independence-from-mike):
+  the built-in tool schemas and descriptions (`src/llm/builtin_tools.rs`),
+  the legal-domain workflow and column presets
+  (`config/workflow-presets/legal/`, `config/column-presets/legal/`) and
+  some interface strings in `frontend/locales/`.
 
-- The word mark **Semplifica**, in any stylisation.
-- The corporate suffix **Semplifica s.r.l.**
-- The logo asset shipped at
-  [`frontend/public/semplifica/logo.png`](frontend/public/semplifica/logo.png)
-  (and its source under [`src/assets/`](src/assets/)).
-- Any visual identity, colour scheme, or wordmark that identifies a
-  build of this software as the original Semplifica distribution
-  (the "Trade Dress").
+Anyone may use, study, modify and redistribute the code under the terms of
+the AGPL, including running it as a network service with the corresponding
+source available.
 
-The brand mark **MikeRust** is also reserved by Semplifica s.r.l. to
-identify the upstream of this repository. Forks are encouraged to
-keep "based on MikeRust" attribution but to choose a distinct name
-for the redistributed binary if their changes are substantial.
+## Project names and logo
 
-## What this means for downstream users
+The names **Cove Studio** and **MikeRust** (its former name) and the
+project logo identify the upstream project maintained by Dario Finardi.
+They are not licensed under the AGPL. If you redistribute a modified
+version:
 
-You have full AGPL-3.0 rights to the *code*: you may use,
-study, modify, and redistribute it under the AGPL conditions
-(including running it as a network service and providing the
-corresponding source).
+1. use a different name and logo for your distribution, so users do not
+   mistake it for the upstream project;
+2. keep the AGPL notices, the copyright lines and the attribution to Mike
+   and to Cove Studio ("based on Cove Studio" is welcome).
 
-You do **not** automatically receive a trademark licence. If you
-redistribute or fork this project, please:
+Unmodified redistributions (mirrors, builds of an unchanged release) may
+keep the name and logo.
 
-1. **Remove or replace the Semplifica wordmark, logo, and any link
-   to https://semplifica.ai** if your distribution carries
-   substantive modifications — to avoid implying endorsement by
-   Semplifica s.r.l.
-2. Keep AGPL attribution intact (the source file headers, the
-   `LICENSE` file, and the legal notices the application surfaces
-   to its users).
-3. If your redistribution is unmodified (e.g. a mirror or a binary
-   build of an unchanged release), you may keep the wordmark and
-   logo as honest attribution. We appreciate it.
+For questions about the names, open an issue at
+[github.com/dariofinardi/CoveStudio](https://github.com/dariofinardi/CoveStudio/issues).
 
-This is the same pattern used by other AGPL-3.0 projects with
-identifiable brand identity (GitLab CE, Mastodon, Nextcloud, Element,
-Plausible, Akeneo PIM, …). Code is open; brand is reserved; the two
-regimes coexist.
-
-## Third-party trademarks
+## Third-party names
 
 The following names appear in the source as references to external
-systems we integrate with, and are trademarks of their respective
-owners — listed here for clarity, not as a claim:
+systems the application integrates with. They belong to their respective
+owners and are listed for clarity, not as a claim:
 
+- **Mike** — Will Chen.
+- **Anthropic / Claude**, **Google Gemini**, **OpenAI**, **Mistral AI**,
+  **Ollama** — model providers and runtimes.
+- **HuggingFace** — Hugging Face, Inc.
 - **CNIL** — Commission nationale de l'informatique et des libertés.
 - **DILA** — Direction de l'information légale et administrative.
-- **Légifrance**, **Journal officiel** — gouvernement français.
+- **Légifrance**, **Journal officiel** — French government.
 - **EUR-Lex** — Publications Office of the European Union.
-- **Normattiva**, **Corte Costituzionale**, **Gazzetta Ufficiale**
-  — Stato italiano.
-- **HuggingFace** — Hugging Face, Inc.
+- **Normattiva**, **Corte Costituzionale**, **Gazzetta Ufficiale** — Italian
+  State.
+- **Omissis / Edito** — referenced from the personal-data disclaimer as an
+  external redaction service.
 
-## Contact
-
-For trademark questions or permission to use the Semplifica wordmark
-in a redistribution, write to
-[git@semplifica.ai](mailto:git@semplifica.ai).
+Open-data corpora keep the licence of their source (for example Etalab 2.0
+for DILA data, CC-BY-4.0 for the Italian legal dataset); the licence of
+each corpus is recorded in its manifest under `config/corpora-plugins/`.

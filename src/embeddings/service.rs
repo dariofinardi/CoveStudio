@@ -1,6 +1,6 @@
 //! Embedding + vector store service (sqlite-vec backend).
 //!
-//! Same SQLite file as the rest of MikeRust (`mike.db`). Vectors live
+//! Same SQLite file as the rest of Cove Studio (`cove-studio.db`). Vectors live
 //! in the `doc_chunks` virtual table created by the sqlite-vec extension
 //! (see migration 0009). Atomic transactions, single-file backup,
 //! shared connection pool with the rest of the app — no separate store,
@@ -175,7 +175,8 @@ impl EmbeddingService {
         self.model
             .get_or_try_init(|| async move {
                 let cache_root = resolve_fastembed_cache_dir();
-                let model_dir = cache_root.join(CACHE_SUBDIR);
+                let model_dir =
+                    crate::product::migrate_entry(&cache_root, CACHE_SUBDIR, LEGACY_CACHE_SUBDIRS);
                 if let Err(e) = tokio::fs::create_dir_all(&model_dir).await {
                     let msg = format!("create cache dir {}: {e}", model_dir.display());
                     *status.write().await = ModelStatus::Failed(msg.clone());
@@ -655,16 +656,13 @@ struct ModelFiles {
 
 /// Where the model bytes live on disk. Honours `FASTEMBED_CACHE_DIR`
 /// (set by `lib::ensure_fastembed_cache_dir` at startup so it points
-/// at `<userdata>/mikerust-data/fastembed/`), falling back to a sane
+/// at `<userdata>/cove-studio-data/fastembed/`), falling back to a sane
 /// per-user default. Never returns a path inside the workspace tree.
 fn resolve_fastembed_cache_dir() -> PathBuf {
     if let Ok(p) = std::env::var("FASTEMBED_CACHE_DIR") {
         return PathBuf::from(p);
     }
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join("mikerust-data").join("fastembed")
+    crate::product::data_subdir("fastembed")
 }
 
 /// Files we need from `Xenova/multilingual-e5-base` on HuggingFace.
@@ -692,10 +690,14 @@ const E5_BASE_FILES: &[(&str, &str)] = &[
 const HF_REPO: &str = "Xenova/multilingual-e5-base";
 
 /// Cache subdirectory under FASTEMBED_CACHE_DIR. Distinct from the
-/// FP32 `mike-e5-base/` so the two can coexist on disk (lets devs
+/// FP32 `e5-base/` so the two can coexist on disk (lets devs
 /// run `tests/embedding_perf.rs::quality_fp32_vs_int8` without
 /// re-downloading either).
-const CACHE_SUBDIR: &str = "mike-e5-base-quantized";
+const CACHE_SUBDIR: &str = "e5-base-quantized";
+
+/// Name of `CACHE_SUBDIR` in earlier releases; moved on first use so the
+/// ~275 MB model is not downloaded again.
+const LEGACY_CACHE_SUBDIRS: &[&str] = &["mike-e5-base-quantized"];
 
 /// Ensure every required E5 file is on disk under `dir`, downloading
 /// any that are missing and updating the shared `status` as bytes
@@ -981,7 +983,7 @@ pub fn ensure_onnxruntime_dylib_path() {
         .and_then(|p| p.parent().map(|x| x.to_path_buf()));
     let cwd = std::env::current_dir().ok();
 
-    // Tauri MSI installs land at `<install>/mike-tauri.exe` with
+    // Tauri MSI installs land at `<install>/cove-studio.exe` with
     // `bundle.resources` files staged under `<install>/resources/`.
     // Including that directory as an additional start makes the
     // walker find `<install>/resources/libs/onnxruntime/<sub>/<file>`

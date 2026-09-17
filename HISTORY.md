@@ -1,15 +1,142 @@
 # History
 
-Release notes for MikeRust. Tagged releases (`v0.1.0` and later) collect
+Release notes for Cove Studio, formerly MikeRust. Entries up to v0.7.5
+were written under the MikeRust name and describe the project as it was
+at that date; statements they make about the relationship with Mike are
+superseded by the README section *Provenance and independence from
+Mike*. Tagged releases (`v0.1.0` and later) collect
 the work into shippable semver bumps; the entries between tags are
 ordered by the date the work landed on `main` (Europe/Rome), most recent
 first. Each entry follows a light Keep-a-Changelog shape (Added /
 Changed / Fixed / Docs / Removed) so contributors can skim by intent.
 
 Commits referenced are short SHAs; run `git log <sha>` for the full
-diff. For the upstream-sync audit trail (which fixes were ported from
-`willchen96/mike` and which we declined), see
-[`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
+diff. For the relationship with `willchen96/mike` and the record of what was
+taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
+
+---
+
+## v0.8.0 — 2026-09-17 (Cove Studio, renamed from MikeRust)
+
+MikeRust is renamed **Cove Studio**. The maintainer is unchanged (Dario
+Finardi); the repository moved from the `SemplificaAI` organisation to
+[github.com/dariofinardi/CoveStudio](https://github.com/dariofinardi/CoveStudio)
+and the project is managed directly by its maintainer. The minor bump
+marks the new identity plus the features below; installations upgrade in
+place, keeping their data.
+
+### Changed — identity
+
+* Product name, desktop identifier (`app.covestudio`), window title,
+  crates (`cove-studio`, `cove-studio-desktop`), executable
+  (`cove-studio`), log file (`cove-studio.log`), user agent
+  (`covestudio/<version>`), environment variable prefix (`COVE_`).
+* All identity values live in `src/product.rs` and
+  `frontend/src/lib/product.ts`; translations use the `{product}` and
+  `{projectExt}` placeholders.
+* Project archives are written as `.coveprj` with magic `COVEPRJ\0`
+  (module renamed `project_archive`).
+* Local secure-mode models are named `covestudio-…-fast`; the context
+  profile aliases are `covestudio-*:ctx*`.
+* The Windows installer keeps the MikeRust upgrade code, so it replaces an
+  existing MikeRust installation.
+* Copyright headers now read "Copyright (c) 2026 Dario Finardi"; the
+  Semplifica logo asset and brand references were removed.
+
+### Added — migration of existing installations
+
+* On first start `mikerust-data/` is moved to `cove-studio-data/`,
+  `mike.db` (with `-wal` / `-shm`) to `cove-studio.db`, and the embedding
+  and GLiNER2 model caches to their new folder names, without downloads.
+* `MRUST_*` environment variables are still read; `.mikeprj` files and the
+  `MIKEPRJ\0` magic are still accepted on import; interface preferences
+  saved under `mikerust.*` keys are moved to `covestudio.*`.
+* Ollama models installed under previous names are copied to the new
+  names (`POST /user/local-secure/migrate`) and the settings that used
+  them are updated; removing the previous names
+  (`POST /user/local-secure/remove-legacy`) or reinstalling a model that
+  could not be copied happens only after the user confirms in Settings.
+
+### Changed — independence from Mike
+
+* The assistant's base instructions were rewritten from scratch in
+  Italian, with a reply-in-the-user's-language rule first, and moved to
+  `config/system-prompts/base.md` (validated against the tokens the
+  citation parser needs, embedded copy as fallback). They were previously
+  adapted from Mike's `SYSTEM_PROMPT`.
+* The project-document rename endpoint, ported from upstream commit
+  `f39f175` on 13 May 2026, was rewritten: the extension now follows the
+  stored file type and names are sanitised.
+* The local-models catalogue moved out of the code into
+  `config/local-models/ollama.json`.
+* README, NOTICE, `docs/UPSTREAM_SYNC.md` and the frontend licence files
+  now state precisely what is original and what still derives from Mike
+  (built-in tool schemas, legal-domain presets, some interface strings).
+
+### Changed — chat pipeline
+
+* `src/routes/chat.rs` split into `chat/prompts.rs` (context blocks and
+  service messages) and `chat/citation_resolution.rs`; fewer database
+  queries per turn (citation indexes built once and only when the reply
+  has citations), request parsed in a single pass, independent queries
+  run concurrently.
+* User-visible service notes (model without tool support, empty answer,
+  tool-loop limit) follow the interface language.
+
+### Added — long documents and context window
+
+* Context window resolved per model before the prompt is assembled: for
+  local Ollama servers from the server itself (`/api/ps` `context_length`,
+  `/api/show` `num_ctx` and `<arch>.context_length`), otherwise from the
+  model catalogue, with the value learnt back from an overflow error
+  (`src/llm/context_window.rs`). `GET /models/context-window` exposes it
+  and Settings shows it under each model picker.
+* Oversized attachments are no longer sent whole: each document gets a
+  share of the window proportional to its size, and a document over its
+  share is cut to the segments that match the question, ranked with BM25
+  (`src/routes/chat/attachment_budget.rs`, `src/document_segments.rs`).
+  The reply says which documents were excerpted.
+* `read_document` reads by page: `page_from` / `page_to` with the totals
+  and where to continue, so the model can walk a long document instead of
+  losing its tail.
+* Gemini 3.7 Flash and Gemini 3.8 Flash in the model catalogue
+  (1,048,576 input / 65,536 output tokens); the context-window table
+  covers the whole `gemini-3.x` family.
+
+### Fixed
+
+* A document generated during a turn now receives a `doc-N` label, so the
+  model can cite it and the citation resolves to the real document. Its
+  citations used to carry an unresolved label, which made the viewer
+  request `/document/doc-1/display`, get a 404 and report a removed
+  source. The interface no longer treats a `doc-N` handle as a fetchable
+  id either.
+* `edit_document` results produce a download card, so an edited document
+  is reachable without regenerating it; a document touched more than once
+  in a turn gets a single card.
+* Tool-result JSON that a model pastes into its own answer is stripped
+  after the stream (`src/routes/chat/tool_echo.rs`): the download card
+  carries that information, and a JSON snippet the user actually asked
+  for is left alone. The base instructions forbid the echo as well.
+* `find_in_document` could slice a UTF-8 boundary and panic on
+  multi-byte text.
+* Project documents listed in the prompt were numbered one lower than the
+  labels resolved by the tools.
+* The Gemma local-model derivation no longer forces Italian replies.
+
+### Changed — dependencies
+
+* SheetJS is vendored as `frontend/vendor/xlsx-0.20.3.tgz`, the official
+  tarball: the npm copy stopped at 0.18.5, which carries the prototype
+  pollution (GHSA-4r6h-8v6p-xvw6) and ReDoS (GHSA-5pgg-2g8v-p4x9)
+  advisories with no npm release to upgrade to.
+* npm dependencies updated within their ranges (postcss, js-yaml,
+  undici, brace-expansion, dompurify, postcss-selector-parser, vitest,
+  svelte, vite, typescript): `pnpm audit` reports no known
+  vulnerabilities. `serde_with` 3.20 → 3.22 (GHSA-7gcf-g7xr-8hxj).
+* Still open: `thrift` 0.17 via `parquet` 53 (GHSA-2f9f-gq7v-9h6m);
+  `parquet` drops thrift only from version 59, which is a major upgrade
+  of the arrow stack.
 
 ---
 

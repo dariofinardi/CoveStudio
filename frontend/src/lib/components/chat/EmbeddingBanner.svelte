@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Model-status banner. Visible only while the chat is waiting for a
   reply AND one of the heavy local models (embeddings or GLiNER2 PII)

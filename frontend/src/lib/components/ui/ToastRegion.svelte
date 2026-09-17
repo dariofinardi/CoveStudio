@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <script lang="ts">
   import { toastStore } from '$lib/stores/toast.svelte'
   import Toast from './Toast.svelte'

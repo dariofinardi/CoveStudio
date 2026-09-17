@@ -1,6 +1,6 @@
 //! Health / liveness / readiness endpoint.
 //!
-//! `GET /healthz` is the single canonical signal of "is mike-tauri
+//! `GET /healthz` is the single canonical signal of "is the desktop app
 //! actually serving?". It returns a JSON envelope with:
 //!
 //!   - `status`: "ok" if the backend is up at all (the request reached

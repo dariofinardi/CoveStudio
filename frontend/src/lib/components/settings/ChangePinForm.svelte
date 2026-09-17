@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Change-PIN form. The default path requires the current PIN. When
   biometrics are enrolled, a "forgot PIN" path lets the user set a new

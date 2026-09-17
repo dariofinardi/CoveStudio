@@ -1,14 +1,15 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Settings → License panel.
 
-  Renders the product's identity (MikeRust + the running version) and
+  Renders the product's identity (name + the running version) and
   the full AGPL-3.0 licence text bundled with the binary. The licence
   text is the canonical `LICENSE` file at the repo root, pulled in via
   Vite's `?raw` import so it ships as a string constant in the bundle
   — no runtime fetch, no risk of a missing-file 404 once installed.
 -->
 <script lang="ts">
+  import { PRODUCT_NAME } from '$lib/product'
   import { i18n } from '$lib/stores/i18n.svelte'
   import { APP_VERSION } from '$lib/stores/app-version.svelte'
   // Repo-root LICENSE (AGPL-3.0-only), inlined by Vite at build time.
@@ -26,7 +27,7 @@
            bg-(--color-surface-0) px-5 py-4"
   >
     <h3 class="text-base font-semibold text-(--color-text-primary)">
-      MikeRust
+      {PRODUCT_NAME}
       <span class="ml-2 text-sm font-normal text-(--color-text-secondary) tabular-nums">
         v{APP_VERSION}
       </span>

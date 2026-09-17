@@ -1,23 +1,18 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
-  MikeRust mark — the 3×3 rust-gradient grid (src/assets/mikerust_logo_3x3.svg).
-  `activity` runs a three-phase pulse over the grid and recolours it:
-    · idle     — static, native rust palette
-    · thinking — pulsing, rust (an LLM call is in flight)
-    · docx     — pulsing, blue (generating a .docx from a template)
-    · upload   — pulsing, green (extracting text from an uploaded file)
+  Product mark "Alveo" — a 5×5 modular grid crossed by an empty channel
+  (src/assets/cove-studio-logo.svg). `activity` animates and recolours it:
+    · idle     — static, theme text colour
+    · thinking — modules assemble along the current, brand colour
+    · docx     — same motion, blue (generating a .docx)
+    · upload   — same motion, green (extracting text from an upload)
 
-  Pulse choreography (positions 1-9 row-major: 1 2 3 / 4 5 6 / 7 8 9)
-  rides three concentric waves on the same 3.2s timeline:
-    corner (9)      — outermost wave, shrinks first / restores last
-    quad   (5,6,8)  — middle wave
-    rest   (1-4,7)  — innermost wave, shrinks only at the midpoint
-  so the loop passes through a beat where the full 3×3 is contracted
-  together before unwinding back to its resting size. See app.css
-  (`mike-logo-pulse-*`) for the exact keyframe timings.
-  Honours prefers-reduced-motion (no animation).
+  The motion reproduces the assembly loop of the original artwork: every
+  module fades and scales in with a delay that follows the diagonal from
+  upstream to downstream. Honours prefers-reduced-motion (no animation).
 -->
 <script lang="ts">
+  import { PRODUCT_NAME } from '$lib/product'
   interface Props {
     size?: number
     activity?: 'idle' | 'thinking' | 'docx' | 'upload'
@@ -26,52 +21,34 @@
 
   let { size = 40, activity = 'idle', class: extraClass = '' }: Props = $props()
 
-  // Grid geometry mirrors mikerust_logo_3x3.svg (group translated to 250,250).
-  const COORD = [-135, -45, 45]
-  const FILLS = [
-    ['#431407', '#7C2D0A', '#9A3412'],
-    ['#7C2D0A', '#C2410C', '#EA580C'],
-    ['#9A3412', '#EA580C', '#F97316'],
+  // Filled modules as [column, row, assembly delay in seconds], on a
+  // 30-unit pitch with 24-unit modules (144×144 view box).
+  const MODULES: [number, number, number][] = [
+    [4, 0, 0], [3, 0, 0.15], [2, 0, 0.3], [1, 0, 0.45], [0, 0, 0.6],
+    [1, 1, 0.6], [0, 1, 0.75],
+    [4, 2, 0.3], [3, 2, 0.45], [0, 2, 0.9],
+    [4, 3, 0.45], [3, 3, 0.6], [2, 3, 0.75],
+    [4, 4, 0.6], [3, 4, 0.75], [2, 4, 0.9], [1, 4, 1.05], [0, 4, 1.2],
   ]
-
-  // Tier classification per the spec:
-  //   corner — position 9 (row 2, col 2): pulses in phases 1 + 2 + 3
-  //   quad   — positions 5, 6, 8 (rest of the 2×2 quadrant): pulses in phases 1 + 3
-  //   rest   — positions 1, 2, 3, 4, 7: pulses only in phase 3
-  function tierFor(row: number, col: number): 'corner' | 'quad' | 'rest' {
-    if (row === 2 && col === 2) return 'corner'
-    if (row >= 1 && col >= 1) return 'quad'
-    return 'rest'
-  }
-
-  const cells = COORD.flatMap((y, row) =>
-    COORD.map((x, col) => ({
-      x,
-      y,
-      fill: FILLS[row][col],
-      tier: tierFor(row, col),
-    })),
-  )
 </script>
 
 <svg
-  class="mike-logo mike-logo-{activity} {extraClass}"
+  class="app-logo app-logo-{activity} {extraClass}"
   width={size}
   height={size}
-  viewBox="105 105 280 280"
+  viewBox="0 0 144 144"
   role="img"
-  aria-label="MikeRust"
+  aria-label={PRODUCT_NAME}
 >
-  <g transform="translate(250,250)">
-    {#each cells as c (`${c.x},${c.y}`)}
-      <rect
-        x={c.x}
-        y={c.y}
-        width="80"
-        height="80"
-        fill={c.fill}
-        class="mike-logo-cell mike-logo-tier-{c.tier}"
-      />
-    {/each}
-  </g>
+  {#each MODULES as [col, row, delay] (`${col},${row}`)}
+    <rect
+      x={col * 30}
+      y={row * 30}
+      width="24"
+      height="24"
+      fill="currentColor"
+      class="app-logo-module"
+      style="animation-delay: {delay}s"
+    />
+  {/each}
 </svg>

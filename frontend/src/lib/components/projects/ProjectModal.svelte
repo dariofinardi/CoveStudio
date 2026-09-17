@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!-- Create / edit a project. `project` non-null switches to edit mode. -->
 <script lang="ts">
   import Modal from '$lib/components/ui/Modal.svelte'

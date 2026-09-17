@@ -7,7 +7,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use mike::AppState;
+use cove_studio::AppState;
 use serde_json::Value;
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
@@ -19,7 +19,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
     let url = format!("sqlite://{}?mode=rwc", db_path.display().to_string().replace('\\', "/"));
 
     #[cfg(feature = "rag")]
-    mike::embeddings::register_sqlite_vec_auto_extension();
+    cove_studio::embeddings::register_sqlite_vec_auto_extension();
 
     let pool = SqlitePoolOptions::new()
         .max_connections(2)
@@ -32,7 +32,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
         .await
         .expect("migrate");
 
-    let sessions = mike::auth::SessionStore::new(pool.clone());
+    let sessions = cove_studio::auth::SessionStore::new(pool.clone());
     let state = AppState {
         db: pool,
         sessions,
@@ -48,7 +48,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
         corpus_import_progress: Default::default(),
         workflow_presets: Default::default(),
         column_presets: Default::default(),
-        model_catalogue: Arc::new(mike::presets::model::ModelCatalogue {
+        model_catalogue: Arc::new(cove_studio::presets::model::ModelCatalogue {
             schema_version: 1,
             providers: vec![],
         }),
@@ -57,7 +57,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
     let state = Arc::new(state);
 
     let app = axum::Router::new()
-        .nest("/chat", mike::routes::chat::router())
+        .nest("/chat", cove_studio::routes::chat::router())
         .with_state(state.clone());
 
     std::mem::forget(dir);

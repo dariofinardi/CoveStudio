@@ -45,10 +45,10 @@ do not match the loaded DLL's ABI. Verify what version ort-sys actually
 links with:
 
 ```powershell
-# Strings like "branch=rel-1.20.0, git-commit=..." in mike-tauri.exe
+# Strings like "branch=rel-1.20.0, git-commit=..." in cove-studio.exe
 # reveal the version ort-sys compiled against. Match the vendored
 # DLL to whatever that string says.
-Select-String -Path target\debug\mike-tauri.exe `
+Select-String -Path target\debug\cove-studio.exe `
   -Pattern 'branch=rel-\d+\.\d+\.\d+' -Encoding Default
 ```
 

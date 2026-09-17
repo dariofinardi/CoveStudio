@@ -71,7 +71,7 @@ impl ManifestAdapter {
         };
         let client = reqwest::Client::builder()
             // Browser-like UA matches what the EUR-Lex adapter does
-            // and avoids the basic "MikeRust/x.y" filter that some
+            // and avoids the basic "<app>/x.y" filter that some
             // sites apply by default.
             .user_agent(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
@@ -1076,7 +1076,7 @@ mod tests {
         let normal = "<html><body><h1>Délibération SAN-2024-013</h1><p>contenu</p></body></html>";
         assert_eq!(detect_anti_bot_challenge(normal), None);
         let mentions_cf =
-            "<html><body><p>Mike runs behind Cloudflare in production.</p></body></html>";
+            "<html><body><p>The service runs behind Cloudflare in production.</p></body></html>";
         assert_eq!(detect_anti_bot_challenge(mentions_cf), None);
     }
 

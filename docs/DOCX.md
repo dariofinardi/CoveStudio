@@ -1,6 +1,6 @@
 # DOCX extraction
 
-MikeRust extracts text from `.docx` files in pure Rust — no LibreOffice, no Pandoc, no external process. The extractor lives at [src/pdf/mod.rs](../src/pdf/mod.rs) (`extract_docx_text`) and is reused by:
+Cove Studio extracts text from `.docx` files in pure Rust — no LibreOffice, no Pandoc, no external process. The extractor lives at [src/pdf/mod.rs](../src/pdf/mod.rs) (`extract_docx_text`) and is reused by:
 
 1. The folder scanner (`src/sync/scanner.rs::extract_text_dispatch`) when indexing `.docx` files into the embedding store.
 2. The chat-upload pipeline (`src/routes/documents.rs::upload_document`, cache path) when an attached docx is hashed and pre-extracted to `data/storage/cache/<hash>.txt`.

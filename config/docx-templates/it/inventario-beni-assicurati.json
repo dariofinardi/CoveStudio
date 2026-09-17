@@ -74,7 +74,7 @@
           "guidance": "Elenco puntato 2-4 punti: fonte (Schede applicazione PDF della polizza), criteri di esclusione (beni dismessi, applicazioni cancellate), trattamento dei valori 'Aggregato', avvertenza che il documento NON sostituisce il contratto di polizza ma ne riassume le applicazioni vigenti alla data del report." },
 
         { "id": "signature_block",
-          "guidance": "Firma del compilatore in basso a destra: nome, qualifica (es. 'Broker assicurativo'), data. Se il report è generato automaticamente indicare 'Documento generato automaticamente da MikeRust — verificare prima della consegna al cliente.'" }
+          "guidance": "Firma del compilatore in basso a destra: nome, qualifica (es. 'Broker assicurativo'), data. Se il report è generato automaticamente indicare 'Documento generato automaticamente da Cove Studio — verificare prima della consegna al cliente.'" }
     ],
 
     "field_prompts": {

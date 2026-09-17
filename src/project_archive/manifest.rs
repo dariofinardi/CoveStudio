@@ -1,4 +1,4 @@
-//! `.mikeprj` manifest schema (v1).
+//! `.coveprj` manifest schema (v1).
 //!
 //! All structs are versioned via the top-level `schema_version`. Adding
 //! optional fields to existing structs is backward-compatible; renaming or
@@ -6,7 +6,7 @@
 //! shapes in the importer.
 //!
 //! v0.5.4 widened several records with optional fields that the v0.5.4
-//! pre-amendment exporter didn't carry. Older `.mikeprj` archives are
+//! pre-amendment exporter didn't carry. Older `.coveprj` archives are
 //! still readable — every new field is `Option<…>` with
 //! `#[serde(default)]` so missing keys deserialize as `None`.
 
@@ -18,7 +18,7 @@ pub const SCHEMA_VERSION: u32 = 1;
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Manifest {
     pub schema_version: u32,
-    /// Free-form, e.g. "MikeRust 0.1.0".
+    /// Free-form, e.g. "Cove Studio 0.1.0".
     pub exporter: String,
     /// ISO-8601 UTC timestamp.
     pub exported_at: String,
@@ -145,7 +145,7 @@ mod tests {
     fn manifest_roundtrips_through_json() {
         let m = Manifest {
             schema_version: SCHEMA_VERSION,
-            exporter: "MikeRust 0.1.0".into(),
+            exporter: "Cove Studio 0.1.0".into(),
             exported_at: "2026-05-06T10:30:00Z".into(),
             exported_by_display_name: Some("Dario".into()),
             contents: ManifestContents {
@@ -160,7 +160,7 @@ mod tests {
         let s = serde_json::to_string(&m).unwrap();
         let back: Manifest = serde_json::from_str(&s).unwrap();
         assert_eq!(back.schema_version, SCHEMA_VERSION);
-        assert_eq!(back.exporter, "MikeRust 0.1.0");
+        assert_eq!(back.exporter, "Cove Studio 0.1.0");
         assert_eq!(back.contents.document_count, 3);
         assert_eq!(back.contents.includes_chats, false);
         assert_eq!(back.exported_by_display_name.as_deref(), Some("Dario"));
@@ -227,7 +227,7 @@ mod tests {
     #[test]
     fn document_record_roundtrips_pre_v054_archives() {
         // v0.5.4 widened DocumentRecord with optional domain /
-        // project_folder_id / decision* fields. Older `.mikeprj`
+        // project_folder_id / decision* fields. Older `.coveprj`
         // archives don't carry them — the importer must still parse
         // them and treat the missing keys as None.
         let raw = json!({

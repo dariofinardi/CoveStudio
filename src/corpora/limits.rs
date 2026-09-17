@@ -49,7 +49,7 @@ impl CorporaLimits {
 /// Resolve `config/corpora.json`. Lookup order mirrors
 /// [`crate::presets::model::catalogue_path`].
 pub fn limits_path() -> PathBuf {
-    if let Ok(p) = std::env::var("MRUST_CORPORA_LIMITS") {
+    if let Some(p) = crate::product::env_var("CORPORA_LIMITS") {
         return PathBuf::from(p);
     }
     if let Ok(cwd) = std::env::current_dir() {

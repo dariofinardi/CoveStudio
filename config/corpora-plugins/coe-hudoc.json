@@ -5,7 +5,7 @@
         "it": "Consiglio d'Europa — HUDOC",
         "en": "Council of Europe — HUDOC"
     },
-    "description": "Giurisprudenza CEDU (HUDOC). Manifest disponibile in UI; connettore runtime non ancora implementato in MikeRust.",
+    "description": "Giurisprudenza CEDU (HUDOC). Manifest disponibile in UI; connettore runtime non ancora implementato in Cove Studio.",
     "homepage": "https://hudoc.echr.coe.int/",
     "languages": ["en", "fr"],
     "default_language": "en",

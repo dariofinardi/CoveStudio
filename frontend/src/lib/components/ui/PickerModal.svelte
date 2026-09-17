@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!-- Generic searchable single/multi-select picker (documents, workflows…). -->
 <script lang="ts" module>
   import type { BadgeTone } from './Badge.svelte'

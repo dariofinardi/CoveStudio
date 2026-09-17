@@ -39,7 +39,7 @@ impl EurlexAdapter {
         // EUR-Lex serves a fully-rendered HTML body to browser-like
         // requests but a near-empty stub when the User-Agent looks
         // like a generic crawler — confirmed empirically when our
-        // earlier `MikeRust/0.1` UA produced sub-100-char bodies on
+        // earlier product UA produced sub-100-char bodies on
         // pages a browser renders fine. We pose as a real browser.
         // Per-request `Accept` and `Accept-Language` headers go on
         // each call so the adapter can request specific languages

@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Settings → EUR-Lex corpus. Search EU legislation, index documents
   into the RAG knowledge base, and manage already-indexed documents.

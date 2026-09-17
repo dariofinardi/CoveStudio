@@ -212,7 +212,7 @@ async fn unlock_biometric(State(state): State<Arc<AppState>>) -> ApiResult {
     }
 
     tracing::info!("[auth] calling bio_verify...");
-    let verified = bio_verify(&state, "Unlock MikeRust")
+    let verified = bio_verify(&state, &format!("Unlock {}", crate::product::NAME))
         .await
         .map_err(|e| { tracing::error!("[auth] bio_verify error: {e}"); err(StatusCode::SERVICE_UNAVAILABLE, &e.to_string()) })?;
 
@@ -312,7 +312,7 @@ async fn change_pin_biometric(
         ));
     }
 
-    let verified = bio_verify(&state, "Reset MikeRust PIN")
+    let verified = bio_verify(&state, &format!("Reset {} PIN", crate::product::NAME))
         .await
         .map_err(|e| err(StatusCode::SERVICE_UNAVAILABLE, &e.to_string()))?;
     if !verified {
@@ -347,7 +347,7 @@ async fn biometric_enable(
     if !biometric::is_available().await {
         return Err(err(StatusCode::SERVICE_UNAVAILABLE, "Biometric not available on this device"));
     }
-    let verified = bio_verify(&state, "Enable biometric unlock for MikeRust")
+    let verified = bio_verify(&state, &format!("Enable biometric unlock for {}", crate::product::NAME))
         .await
         .map_err(|e| err(StatusCode::SERVICE_UNAVAILABLE, &e.to_string()))?;
     if !verified {

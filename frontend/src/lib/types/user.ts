@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 /** Types mirroring `src/routes/user.rs`. */
 
@@ -53,7 +53,7 @@ export interface LlmSettings {
   mistral_api_key?: string | null
   mistral_model?: string | null
   /** v0.5.6: "Modalità sicura locale" toggle. ON → local provider
-   *  pins to loopback + curated `mike-…-fast` model ids only. */
+   *  pins to loopback + models of the local-models catalogue only. */
   local_secure_mode?: boolean
   /** v0.6.0: Mistral `safe_prompt` request param. OFF by default;
    *  ON applies Mistral's upstream safety wrapper. */
@@ -70,8 +70,8 @@ export interface LlmSettings {
  *  /user/local-secure/models). Mirrors `local_secure_models` in
  *  `src/routes/user.rs`. */
 export interface CuratedModelEntry {
-  /** Mike-side id (`mike-qwen35-4b-fast`, `mike-gemma4-e2b-fast`).
-   *  This is what gets written to `user_settings.local_model`. */
+  /** Catalogue id (`config/local-models/ollama.json`). This is what
+   *  gets written to `user_settings.local_model`. */
   id: string
   /** Upstream tag Ollama needs to pull (`qwen2.5:3b-instruct-q4_K_M`
    *  or `hf.co/…:Q4_K_M`). Shown in the Settings UI as the source. */
@@ -81,12 +81,25 @@ export interface CuratedModelEntry {
   approx_size_gb: number
   /** Minimum recommended RAM in GB. */
   min_ram_gb: number
-  /** Is the `mike-…-fast` wrapper present? Drives the
+  /** Is the catalogue derivation present? Drives the
    *  Installato / Installa decision in the UI. */
   ready: boolean
   /** Is the BASE model already on disk? Lets the UI show
    *  "wrapper missing — fast install" vs "pulling X GB". */
   base_present: boolean
+  /** Names from earlier releases under which this model is still
+   *  installed in Ollama (e.g. `old-name:latest`). */
+  legacy_installed: string[]
+}
+
+/** Result of POST /user/local-secure/migrate. */
+export interface LocalModelMigrationReport {
+  /** Models now available under the current name. */
+  migrated: { from: string; to: string }[]
+  /** Models that could not be copied: they must be installed again. */
+  failed: { from: string; to: string; error: string }[]
+  /** Previous names still present in Ollama, removable after consent. */
+  leftovers: string[]
 }
 
 /** SSE event yielded by `POST /user/local-secure/ensure/{id}`. The

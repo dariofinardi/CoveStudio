@@ -91,6 +91,6 @@ PLAN.md
 TODO.md
 .git/
 
-# Test sources — cargo test is a separate binary; the dev `mike-tauri`
+# Test sources — cargo test is a separate binary; the dev `cove-studio`
 # never executes them, so changes here shouldn't restart the dev loop
 tests/

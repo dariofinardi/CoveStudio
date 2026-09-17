@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 import { api } from './client'
 import type { Domain } from '$lib/types/domain'
@@ -7,6 +7,7 @@ import type {
   LlmSettings,
   Locale,
   LocalSecureEnsureEvent,
+  LocalModelMigrationReport,
   McpServer,
   McpTransport,
   UserProfile,
@@ -152,12 +153,24 @@ export const userApi = {
     }
   },
 
-  /** Remove the `mike-…-fast` wrapper (keeps the base model on disk). */
+  /** Remove a catalogue model's derivation (keeps the base model on disk). */
   localSecureUninstall: (modelId: string) =>
     api<{ ok: boolean }>(
       `/user/local-secure/uninstall/${encodeURIComponent(modelId)}`,
       { method: 'DELETE' },
     ),
+
+  /** Copy models installed under previous names to the current names
+   *  (no download, nothing deleted) and update the settings using them. */
+  localSecureMigrate: () =>
+    api<LocalModelMigrationReport>('/user/local-secure/migrate', { method: 'POST' }),
+
+  /** Delete previous model names from Ollama. Call only after the user agreed. */
+  localSecureRemoveLegacy: (names: string[]) =>
+    api<{ removed: string[] }>('/user/local-secure/remove-legacy', {
+      method: 'POST',
+      body: { names },
+    }),
 
   listMcpServers: () => api<{ servers: McpServer[] }>('/user/mcp-servers'),
 

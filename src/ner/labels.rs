@@ -3,7 +3,7 @@
 //!
 //! The exact labels each model emits depend on its training schema —
 //! these constants match the GDPR + Italian-fiscal taxonomy that
-//! MikeRust's other verticals already lean on. If the model card
+//! Cove Studio's other verticals already lean on. If the model card
 //! later confirms different label strings, fix the constants here
 //! and nothing else — the engine takes the slice as-is.
 //!

@@ -1,12 +1,12 @@
-# Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+# Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Launch MikeRust in debug mode from the repo root.
+  Launch Cove Studio in debug mode from the repo root.
 
 .DESCRIPTION
   Thin convenience wrapper around `scripts/dev.ps1`. Defaults to
-  verbose backend tracing (`-LogTrace` = RUST_LOG=mike=debug,info) so
+  verbose backend tracing (`-LogTrace` = RUST_LOG=cove_studio=debug,info) so
   the dev window shows the same level of detail you'd expect from a
   "debug build" — without having to remember the flag.
 
@@ -21,7 +21,7 @@
 
 .PARAMETER RustLog
   Override the RUST_LOG value (only relevant without -Quiet). Default:
-  `mike=debug,info`. Examples: `mike=trace,info`, `info,mike=debug,
+  `cove_studio=debug,info`. Examples: `cove_studio=trace,info`, `info,cove_studio=debug,
   hyper=warn`.
 
 .EXAMPLE
@@ -33,13 +33,13 @@
     Launch dev mode without setting RUST_LOG.
 
 .EXAMPLE
-  ./run.ps1 -RustLog 'mike=trace,info,hyper=warn'
+  ./run.ps1 -RustLog 'cove_studio=trace,info,hyper=warn'
     Launch dev mode with a custom trace level.
 #>
 [CmdletBinding()]
 param(
     [switch]$Quiet,
-    [string]$RustLog = 'mike=debug,info'
+    [string]$RustLog = 'cove_studio=debug,info'
 )
 
 $ErrorActionPreference = 'Stop'

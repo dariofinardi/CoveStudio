@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Root: runs the boot sequence (port discovery → /healthz → /auth/status)
   then dispatches on the router store. The full feature router (plan §13)

@@ -1,4 +1,4 @@
-# Macchine industriali — mapping brief → preset MikeRust
+# Macchine industriali — mapping brief → preset Cove Studio
 
 > **Fonte**: [`docs/macchine.md`](macchine.md) v2.2 (1544 righe, 2026-05-21).
 > Questo file mappa le sezioni del brief operativo ai preset
@@ -27,9 +27,9 @@ Il brief §6 distingue tre categorie:
   Sezione_Documento / Tipo_GAP / Note).
 - **C — Generazione DOCX**: bozza documento prodotta tramite template.
 
-In MikeRust **tutte le categorie B sono implementate come workflow
+In Cove Studio **tutte le categorie B sono implementate come workflow
 `assistant`** (non come workflow `tabular`), perché lo schema "1 riga
-= 1 requisito" del brief è l'inverso del tabular MikeRust (che ha
+= 1 requisito" del brief è l'inverso del tabular Cove Studio (che ha
 "1 riga = 1 documento"). L'assistant emette la tabella nel corpo
 della risposta.
 
@@ -37,13 +37,13 @@ della risposta.
 
 ### Prerequisito
 
-| Brief | Preset MikeRust | Tipo | Stato |
+| Brief | Preset Cove Studio | Tipo | Stato |
 |---|---|---|---|
 | Prompt A — Classificazione documento | `macchine-classify-doc` | assistant | ✅ |
 
 ### Categoria A — Analisi
 
-| Brief | Preset MikeRust | Tipo | Template DOCX | Stato |
+| Brief | Preset Cove Studio | Tipo | Template DOCX | Stato |
 |---|---|---|---|---|
 | A1 — Analisi fascicolo tecnico (L3) | `macchine-audit-fascicolo` | assistant | `macchine-audit-fascicolo-report` | ✅ |
 | A2 — Analisi manuale d'uso (L2) | *(coperto da B2 + audit fascicolo)* | — | — | 🟡 parziale |
@@ -63,7 +63,7 @@ della risposta.
 
 ### Categoria B — Checklist tabellari
 
-| Brief | Preset MikeRust | Tipo | Stato |
+| Brief | Preset Cove Studio | Tipo | Stato |
 |---|---|---|---|
 | B1 — Fascicolo tecnico L3 | `macchine-fascicolo-l3-checklist` | assistant | ✅ |
 | B2 — Manuale d'uso L2 | `macchine-manuale-l2-checklist` | assistant | ✅ |
@@ -76,7 +76,7 @@ della risposta.
 
 ### Categoria C — Generazione DOCX
 
-| Brief | Preset MikeRust | Tipo | Template DOCX | Stato |
+| Brief | Preset Cove Studio | Tipo | Template DOCX | Stato |
 |---|---|---|---|---|
 | C1 — Genera manuale d'uso | `macchine-genera-manuale` | assistant | `macchine-manuale-uso-bozza` | ✅ |
 | C2 — Espandi istruzioni assemblaggio | `macchine-espandi-assemblaggio` | assistant | — | ✅ |

@@ -36,7 +36,7 @@ pub const TRIGGER_RATIO: f32 = 0.8;
 /// from overflowing a window the prompt already nearly filled.
 pub const REPLY_RESERVE_TOKENS: usize = 4096;
 
-/// Rough characters-per-token for European languages with Mike's
+/// Rough characters-per-token for European languages with the app's
 /// typical legal text. e5/Llama-3 tokenizers land around 3.8–4.2 chars
 /// per token; we use 4 as a portable heuristic. We could load the
 /// actual tokenizer of the target model but the cost/complexity isn't
@@ -91,7 +91,10 @@ pub fn context_window_tokens(model: &str) -> usize {
     }
     if m.starts_with("gemini-2.5-flash")
         || m.starts_with("gemini-3-flash")
-        || m.starts_with("gemini-3.5-flash")
+        // Every Gemini 3.x Flash so far ships a 1M window (3.5, 3.6, 3.7,
+        // 3.8); this keeps new minor versions working before the catalogue
+        // lists them.
+        || m.starts_with("gemini-3.")
     {
         return 1_000_000;
     }
@@ -123,7 +126,12 @@ pub fn context_window_tokens(model: &str) -> usize {
 /// caller measures that because it owns those strings; here we add the
 /// history and a reply reserve and compare against `0.8 × window`.
 pub fn should_summarize(messages: &[Message], model: &str, system_overhead_tokens: usize) -> bool {
-    let window = context_window_tokens(model);
+    should_summarize_within(messages, context_window_tokens(model), system_overhead_tokens)
+}
+
+/// Same as [`should_summarize`] with an explicit window, e.g. the one
+/// reported by a local Ollama server (see `super::context_window`).
+pub fn should_summarize_within(messages: &[Message], window: usize, system_overhead_tokens: usize) -> bool {
     let used =
         system_overhead_tokens + estimate_messages_tokens(messages) + REPLY_RESERVE_TOKENS;
     let trigger = (window as f32 * TRIGGER_RATIO) as usize;
@@ -256,8 +264,9 @@ pub async fn maybe_compress_history(
     target_model: &str,
     creds: &SummarizerCreds,
     system_overhead_tokens: usize,
+    context_window_tokens: usize,
 ) -> Vec<Message> {
-    if !should_summarize(&messages, target_model, system_overhead_tokens) {
+    if !should_summarize_within(&messages, context_window_tokens, system_overhead_tokens) {
         return messages;
     }
     let (older, newer) = split_at_recent_window(&messages);
@@ -381,6 +390,8 @@ mod tests {
         assert_eq!(context_window_tokens("gemini-2.5-flash"), 1_000_000);
         assert_eq!(context_window_tokens("gemini-3-flash-preview"), 1_000_000);
         assert_eq!(context_window_tokens("gemini-3.5-flash"), 1_000_000);
+        assert_eq!(context_window_tokens("gemini-3.7-flash"), 1_000_000);
+        assert_eq!(context_window_tokens("gemini-3.8-flash"), 1_000_000);
         assert_eq!(context_window_tokens("gemini-1.5-pro"), 2_000_000);
         assert_eq!(context_window_tokens("gemini-pro"), 32_000);
     }
@@ -458,6 +469,7 @@ mod tests {
             "gemini-2.5-flash",
             &creds,
             0,
+            context_window_tokens("gemini-2.5-flash"),
         ));
         assert_eq!(out.len(), msgs.len());
     }

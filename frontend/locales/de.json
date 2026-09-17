@@ -40,12 +40,12 @@
     "expand": "Aufklappen"
   },
   "App": {
-    "title": "MikeRust",
+    "title": "{product}",
     "tagline": "Lokaler juristischer KI-Assistent",
-    "versionTooltip": "MikeRust v{version}"
+    "versionTooltip": "{product} v{version}"
   },
   "Login": {
-    "heading": "Bei MikeRust anmelden",
+    "heading": "Bei {product} anmelden",
     "subheading": "Geben Sie Ihre PIN ein oder verwenden Sie die biometrische Authentifizierung",
     "pinLabel": "PIN",
     "pinPlaceholder": "Geben Sie Ihre PIN ein",
@@ -61,7 +61,7 @@
     "errorBiometric": "Biometrische Authentifizierung fehlgeschlagen"
   },
   "Signup": {
-    "heading": "MikeRust-Konto erstellen",
+    "heading": "{product}-Konto erstellen",
     "subheading": "Legen Sie eine PIN zum Schutz Ihrer Daten fest",
     "usernameLabel": "Benutzername",
     "usernamePlaceholder": "Wählen Sie einen Benutzernamen",
@@ -88,8 +88,6 @@
     "tabularReviews": "Tabellarische Auswertungen",
     "docxTemplates": "DOCX-Vorlagen",
     "account": "Konto",
-    "semplifica": "Semplifica s.r.l.",
-    "semplificaTitle": "semplifica.ai im Browser öffnen",
     "recentChats": "Letzte Chats",
     "noChats": "Keine Chats",
     "recentProjects": "Letzte Projekte",
@@ -196,7 +194,7 @@
   "ProjectExport": {
     "exportButton": "Projekt exportieren",
     "title": "Projekt exportieren",
-    "subtitle": "Erstellen Sie eine verschlüsselte .mikeprj-Datei, die Ihr Kollege in sein MikeRust importieren kann. Die Datei lässt sich nur öffnen, wenn der Empfänger mit der unten angegebenen E-Mail-Adresse registriert ist.",
+    "subtitle": "Erstellen Sie eine verschlüsselte .{projectExt}-Datei, die Ihr Kollege in sein {product} importieren kann. Die Datei lässt sich nur öffnen, wenn der Empfänger mit der unten angegebenen E-Mail-Adresse registriert ist.",
     "recipientEmail": "E-Mail-Adresse des Empfängers",
     "recipientEmailPlaceholder": "kollege@kanzlei.de",
     "includeChats": "Chatverlauf einbeziehen",
@@ -208,8 +206,8 @@
   },
   "ProjectImport": {
     "title": "Projekt importieren",
-    "subtitle": "Legen Sie hier eine mit Ihnen geteilte .mikeprj-Datei ab. Sie wird als neues Projekt unter Ihrem Konto importiert.",
-    "dropHint": "Legen Sie die .mikeprj-Datei hier ab",
+    "subtitle": "Legen Sie hier eine mit Ihnen geteilte .{projectExt}-Datei ab. Sie wird als neues Projekt unter Ihrem Konto importiert.",
+    "dropHint": "Legen Sie die .{projectExt}-Datei hier ab",
     "dropping": "Importieren…",
     "yourEmail": "Ihre registrierte E-Mail-Adresse",
     "yourEmailHint": "Muss mit der E-Mail-Adresse übereinstimmen, die der Absender beim Export als Empfänger angegeben hat.",
@@ -853,7 +851,7 @@
     "exportCsv": "CSV exportieren",
     "exportXlsx": "XLSX exportieren",
     "deleteReview": "Auswertung löschen",
-    "renameReview": "Auswertung umbenennen",
+    "renameReview": "Prüfung umbenennen",
     "rerunCell": "Zelle erneut ausführen",
     "rerunRow": "Zeile erneut ausführen",
     "rerunColumn": "Spalte erneut ausführen",
@@ -873,7 +871,6 @@
     "selectWorkflowOption": "— tabellarischen Workflow auswählen —",
     "pickWorkflowError": "Wählen Sie einen tabellarischen Workflow.",
     "createdToast": "Prüfung erstellt",
-    "renameReview": "Prüfung umbenennen",
     "renamedToast": "Prüfung umbenannt",
     "deletedToast": "Prüfung gelöscht",
     "deleteError": "Prüfung konnte nicht gelöscht werden",
@@ -1108,16 +1105,16 @@
   },
   "Boot": {
     "cannotReach": "Backend nicht erreichbar",
-    "cannotReachHint": "Stellen Sie sicher, dass das MikeRust-Backend läuft. In der Entwicklung starten Sie es im Repository-Stammverzeichnis mit",
-    "connecting": "Verbindung mit MikeRust…"
+    "cannotReachHint": "Stellen Sie sicher, dass das {product}-Backend läuft. In der Entwicklung starten Sie es im Repository-Stammverzeichnis mit",
+    "connecting": "Verbindung mit {product}…"
   },
   "Auth": {
     "welcome": "Willkommen, {name}",
     "welcomeBack": "Willkommen zurück, {name}",
-    "setupTitle": "Willkommen bei MikeRust",
+    "setupTitle": "Willkommen bei {product}",
     "setupSubtitle": "Erstellen Sie Ihr lokales Profil. Alles bleibt auf diesem Gerät.",
     "setupPinNote": "Ihr PIN schützt den lokalen Zugriff. Es gibt keine Passwortwiederherstellung — bewahren Sie ihn sicher auf.",
-    "unlockTitle": "MikeRust entsperren",
+    "unlockTitle": "{product} entsperren",
     "unlockTitleNamed": "Entsperren, {name}",
     "unlockSubtitle": "Geben Sie Ihren PIN ein, um fortzufahren.",
     "username": "Benutzername",
@@ -1134,7 +1131,7 @@
     "createProfile": "Profil erstellen",
     "unlock": "Entsperren",
     "useBiometric": "Biometrische Entsperrung verwenden",
-    "biometricReason": "MikeRust mit Ihrer biometrischen Authentifizierung entsperren",
+    "biometricReason": "{product} mit Ihrer biometrischen Authentifizierung entsperren",
     "lockout": "Zu viele Versuche — erneut in {secs}s"
   },
   "Ui": {
@@ -1235,6 +1232,24 @@
     "localSecureUninstalledToast": "Modell entfernt",
     "localSecureCancelled": "Download abgebrochen",
     "localSecureCancelHint": "Laufenden Download abbrechen",
+    "localSecureMigratedToast": "Lokale Modelle umbenannt ({n})",
+    "localSecureMigrateError": "Lokale Modelle konnten nicht umbenannt werden",
+    "localSecureCleanupTitle": "Modelle mit dem alten Namen entfernen?",
+    "localSecureCleanupMessage": "Die lokalen Modelle sind unter dem neuen Namen verfügbar. Die alten Namen aus Ollama entfernen ({names})? Die Modelldaten sind geteilt: Es wird nichts heruntergeladen.",
+    "localSecureCleanupReinstallMessage": "{models} konnte nicht umbenannt werden. Die Versionen mit dem alten Namen aus Ollama entfernen ({names}) und neu herunterladen?",
+    "localSecureCleanupConfirm": "Entfernen",
+    "localSecureCleanupKeep": "Behalten",
+    "localSecureCleanupDoneToast": "Alte Namen entfernt",
+    "localSecureCleanupError": "Alte Namen konnten nicht entfernt werden",
+    "contextWindowLabel": "Kontextfenster: {tokens} Token",
+    "contextWindowSourceServer": "vom Server gemeldet",
+    "contextWindowSourceServerError": "aus einer Serverfehlermeldung gelesen",
+    "contextWindowSourceCatalogue": "aus dem Modellkatalog",
+    "contextWindowSourceDefault": "Schätzung, nicht gemeldet",
+    "contextWindowModelMax": "Modellmaximum {max}",
+    "contextWindowModelfile": "num_ctx im Modelfile {n}",
+    "contextWindowNotLoaded": "Modell nicht geladen: der tatsächliche Wert ist nach der ersten Nutzung bekannt",
+    "contextWindowLoading": "Kontextfenster wird geprüft…",
     "baseUrl": "Basis-URL",
     "modelRoles": "Modellrollen",
     "modelRolesHint": "Welches Modell welche Aufgabe übernimmt",
@@ -1283,12 +1298,12 @@
     "enabledDomainsError": "Domänen konnten nicht aktualisiert werden",
     "atLeastOneDomain": "Mindestens eine Domäne muss aktiv bleiben",
     "license": "Lizenz",
-    "licenseIntro": "MikeRust ist freie Software unter der GNU Affero General Public License v3 (AGPL-3.0-only). Sie dürfen sie verwenden, ändern und weitergeben; wird sie als Netzwerkdienst angeboten, muss der geänderte Quellcode den Nutzern dieses Dienstes zur Verfügung gestellt werden.",
+    "licenseIntro": "{product} ist freie Software unter der GNU Affero General Public License v3 (AGPL-3.0-only). Sie dürfen sie verwenden, ändern und weitergeben; wird sie als Netzwerkdienst angeboten, muss der geänderte Quellcode den Nutzern dieses Dienstes zur Verfügung gestellt werden.",
     "licenseSpdx": "SPDX-Bezeichner",
     "licenseFullText": "Vollständiger Lizenztext",
     "retrieval": "Recherche",
     "retrievalTitle": "Dokumentenrecherche",
-    "retrievalIntro": "Verhaltensoptionen, die ändern, wie der Assistent während eines Chats Ihre Bibliothek durchsucht. Jede ist opt-in und kann ohne Neustart von MikeRust deaktiviert werden.",
+    "retrievalIntro": "Verhaltensoptionen, die ändern, wie der Assistent während eines Chats Ihre Bibliothek durchsucht. Jede ist opt-in und kann ohne Neustart von {product} deaktiviert werden.",
     "retrievalHydeLabel": "HyDE — Hypothetical Document Embeddings",
     "retrievalHydeDescription": "Vor der Suche entwirft der Assistent eine kurze Pseudo-Antwort im Register der aktiven Domäne (juristisch / medizinisch / Finanzen / …) und nutzt sie als zweite Sonde. Beide Rankings werden fusioniert. Hilft, Passagen zu finden, die wie eine Antwort und nicht wie eine Frage formuliert sind.",
     "retrievalHydeCost": "Fügt einen zusätzlichen LLM-Aufruf pro Chat-Runde hinzu. Die Kosten gehen an Ihren aktiven Anbieter (Anthropic / Gemini / OpenAI / lokal), nicht an lokale Rechenleistung.",
@@ -1326,7 +1341,7 @@
       "acknowledge": "Verstanden, fortfahren",
       "statusLoading": "PII-Modell wird geladen… der erste Start lädt ~500 MB von HuggingFace herunter und initialisiert dann die ONNX-Sitzung.",
       "statusFailed": "PII-Modell konnte nicht geladen werden",
-      "statusUnavailable": "PII-Schutz angefordert, aber dieser MikeRust-Build wurde ohne das ner-pii-Feature kompiliert — das Dokument wird unredigiert gesendet."
+      "statusUnavailable": "PII-Schutz angefordert, aber dieser {product}-Build wurde ohne das ner-pii-Feature kompiliert — das Dokument wird unredigiert gesendet."
     }
   },
   "NerStatus": {

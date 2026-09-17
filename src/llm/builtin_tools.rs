@@ -77,13 +77,23 @@ pub fn schemas() -> Vec<ToolSchema> {
     vec![
         fun(
             READ_DOCUMENT,
-            "Read the full text content of a document attached by the user. Always call this before answering questions about, summarising, or citing from a document.",
+            "Read the text content of a document attached by the user. Always call this before answering questions about, summarising, or citing from a document. Long documents are returned a range at a time: the result says which pages (or parts, for text without pages) it contains and where to continue.",
             json!({
                 "type": "object",
                 "properties": {
                     "doc_id": {
                         "type": "string",
                         "description": "The document ID to read (e.g. 'doc-1', 'doc-2')"
+                    },
+                    "page_from": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional first page to read (the N of the [Page N] markers). For documents without pages, the first part number."
+                    },
+                    "page_to": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Optional last page (or part) to read, inclusive."
                     }
                 },
                 "required": ["doc_id"]
@@ -223,9 +233,12 @@ pub async fn dispatch(
     doc_label_map: &HashMap<String, String>,
     name: &str,
     arguments: &Value,
+    read_budget_chars: usize,
 ) -> String {
     match name {
-        READ_DOCUMENT => exec_read_document(state, user_id, doc_label_map, arguments).await,
+        READ_DOCUMENT => {
+            exec_read_document(state, user_id, doc_label_map, arguments, read_budget_chars).await
+        }
         FIND_IN_DOCUMENT => exec_find_in_document(state, user_id, doc_label_map, arguments).await,
         READ_WORKFLOW => exec_read_workflow(state, user_id, arguments).await,
         GENERATE_DOCX => exec_generate_docx(state, user_id, chat_id, arguments).await,
@@ -330,6 +343,7 @@ async fn exec_read_document(
     user_id: &str,
     doc_label_map: &HashMap<String, String>,
     arguments: &Value,
+    read_budget_chars: usize,
 ) -> String {
     let doc_label = arguments.get("doc_id").and_then(|v| v.as_str()).unwrap_or("");
     if doc_label.is_empty() {
@@ -352,13 +366,113 @@ async fn exec_read_document(
         Ok(t) => t,
         Err(e) => return json!({"error": e}).to_string(),
     };
-    json!({
-        "doc_id": doc_label,
-        "filename": filename,
-        "file_type": file_type,
-        "text": text,
-    })
-    .to_string()
+    let range = (
+        arguments.get("page_from").and_then(Value::as_u64).map(|n| n as usize),
+        arguments.get("page_to").and_then(Value::as_u64).map(|n| n as usize),
+    );
+    let mut out = read_range(&text, range, read_budget_chars);
+    out["doc_id"] = json!(doc_label);
+    out["filename"] = json!(filename);
+    out["file_type"] = json!(file_type);
+    out.to_string()
+}
+
+/// Text to return for `read_document`: the whole document when it fits the
+/// budget and no range is asked, otherwise the requested pages (or parts)
+/// up to the budget, with where to continue.
+fn read_range(text: &str, (from, to): (Option<usize>, Option<usize>), budget_chars: usize) -> Value {
+    use crate::document_segments::{render, segment, SegmentUnit};
+
+    let total_chars = text.chars().count();
+    let (unit, segments) = segment(text);
+    let unit_name = match unit {
+        SegmentUnit::Page => "page",
+        SegmentUnit::Part => "part",
+    };
+    if from.is_none() && to.is_none() && total_chars <= budget_chars {
+        return json!({
+            "text": text,
+            "unit": unit_name,
+            "total": segments.len(),
+            "complete": true,
+        });
+    }
+    let (Some(first), Some(last)) = (segments.first(), segments.last()) else {
+        return json!({ "text": text, "unit": unit_name, "total": 0, "complete": true });
+    };
+    let from = from.unwrap_or(first.number);
+    let to = to.unwrap_or(last.number).max(from);
+
+    let mut selected = Vec::new();
+    let mut used = 0usize;
+    let mut stopped_before: Option<usize> = None;
+    for seg in segments.iter().filter(|s| s.number >= from && s.number <= to) {
+        let size = seg.chars() + 16;
+        if !selected.is_empty() && used + size > budget_chars {
+            stopped_before = Some(seg.number);
+            break;
+        }
+        selected.push(seg);
+        used += size;
+    }
+    let Some(returned_from) = selected.first().map(|s| s.number) else {
+        return json!({
+            "error": format!("no {unit_name} in range {from}-{to}; this document has {unit_name}s {}-{}", first.number, last.number),
+        });
+    };
+    let returned_to = selected.last().map(|s| s.number).unwrap_or(returned_from);
+
+    let mut body = render(unit, &selected);
+    let mut cut_inside = false;
+    if body.chars().count() > budget_chars {
+        body = body.chars().take(budget_chars).collect();
+        cut_inside = true;
+    }
+    let next = stopped_before.or_else(|| {
+        (returned_to < last.number).then(|| {
+            segments.iter().map(|s| s.number).find(|n| *n > returned_to).unwrap_or(returned_to + 1)
+        })
+    });
+    let requested_more = to > returned_to || cut_inside;
+    let mut result = json!({
+        "text": body,
+        "unit": unit_name,
+        "total": segments.len(),
+        "first": first.number,
+        "last": last.number,
+        "returned_from": returned_from,
+        "returned_to": returned_to,
+        "complete": returned_from == first.number && returned_to == last.number && !cut_inside,
+    });
+    if cut_inside {
+        result["note"] = json!(format!(
+            "{unit_name} {returned_to} is longer than the reading limit and was cut; use find_in_document to reach specific passages in it."
+        ));
+    } else if let Some(n) = next.filter(|_| requested_more || to == last.number) {
+        result["next_page_from"] = json!(n);
+        result["note"] = json!(format!(
+            "The document continues. Call read_document with page_from = {n} to read on, or use find_in_document to locate specific passages."
+        ));
+    }
+    result
+}
+
+/// Largest char boundary at or below `i`.
+fn floor_boundary(s: &str, mut i: usize) -> usize {
+    i = i.min(s.len());
+    while !s.is_char_boundary(i) {
+        i -= 1;
+    }
+    i
+}
+
+/// Smallest char boundary at or above `i`.
+fn ceil_boundary(s: &str, mut i: usize) -> usize {
+    i = i.min(s.len());
+    while !s.is_char_boundary(i) {
+        i += 1;
+    }
+    i
 }
 
 async fn exec_find_in_document(
@@ -403,8 +517,8 @@ async fn exec_find_in_document(
     let mut start = 0usize;
     while let Some(idx) = haystack_norm[start..].find(&needle) {
         let abs = start + idx;
-        let ctx_lo = abs.saturating_sub(60);
-        let ctx_hi = (abs + needle.len() + 60).min(haystack_norm.len());
+        let ctx_lo = floor_boundary(&haystack_norm, abs.saturating_sub(60));
+        let ctx_hi = ceil_boundary(&haystack_norm, abs + needle.len() + 60);
         let snippet = &haystack_norm[ctx_lo..ctx_hi];
         matches.push(json!({
             "offset": abs,
@@ -978,7 +1092,11 @@ async fn exec_edit_document(
         .map(|(e, h)| json!({"find": e.find, "replace": e.replace, "hits": h}))
         .collect();
     json!({
+        // `doc_id` stays the chat-local label the model works with;
+        // `document_id` is the real row id, used only by the UI layer to
+        // build the download card (see `tool_step_event`).
         "doc_id": label,
+        "document_id": real_id,
         "filename": filename,
         "edits_applied": summary,
     })
@@ -1013,7 +1131,7 @@ fn extract_text(file_type: &str, filename: &str, bytes: &[u8]) -> String {
         "pdf" => {
             #[cfg(feature = "pdf")]
             {
-                let tmp = std::env::temp_dir().join(format!("mike-builtin-{filename}"));
+                let tmp = std::env::temp_dir().join(crate::product::temp_file_name(&format!("builtin-{filename}")));
                 if std::fs::write(&tmp, bytes).is_ok() {
                     let out = crate::pdf::extract_full_text(&tmp).unwrap_or_default();
                     let _ = std::fs::remove_file(&tmp);
@@ -1034,6 +1152,51 @@ fn extract_text(file_type: &str, filename: &str, bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn read_range_returns_whole_short_documents() {
+        let v = super::read_range("[Page 1]\nuno\n[Page 2]\ndue\n", (None, None), 10_000);
+        assert_eq!(v["complete"], true);
+        assert_eq!(v["total"], 2);
+        assert!(v.get("next_page_from").is_none());
+    }
+
+    #[test]
+    fn read_range_pages_long_documents_within_the_budget() {
+        let page = "x".repeat(900);
+        let text: String = (1..=10).map(|n| format!("[Page {n}]\n{page}\n")).collect();
+        let v = super::read_range(&text, (None, None), 3_000);
+        assert_eq!(v["returned_from"], 1);
+        assert_eq!(v["returned_to"], 3);
+        assert_eq!(v["next_page_from"], 4);
+        assert_eq!(v["complete"], false);
+        let v = super::read_range(&text, (Some(9), None), 3_000);
+        assert_eq!(v["returned_from"], 9);
+        assert_eq!(v["returned_to"], 10);
+        assert!(v.get("next_page_from").is_none());
+        assert!(v["text"].as_str().unwrap().starts_with("[Page 9]"));
+    }
+
+    #[test]
+    fn read_range_cuts_a_single_oversized_segment() {
+        let text = format!("[Page 1]\n{}\n", "y".repeat(5_000));
+        let v = super::read_range(&text, (None, None), 1_000);
+        assert_eq!(v["text"].as_str().unwrap().chars().count(), 1_000);
+        assert!(v["note"].as_str().unwrap().contains("cut"));
+    }
+
+    #[test]
+    fn read_range_reports_an_empty_range() {
+        let v = super::read_range("[Page 1]\nuno\n", (Some(5), Some(6)), 100);
+        assert!(v["error"].as_str().unwrap().contains("no page"));
+    }
+
+    #[test]
+    fn char_boundaries_are_safe_around_accents() {
+        let s = "àèìòù";
+        assert_eq!(super::floor_boundary(s, 3), 2);
+        assert_eq!(super::ceil_boundary(s, 3), 4);
+    }
+
     use super::*;
 
     #[test]

@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   DOCX-template detail. Shows the authoring contract (auto-generated
   prompt + section skeleton + required metadata), lets the user apply

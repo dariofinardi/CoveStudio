@@ -18,13 +18,11 @@ use crate::sync::scanner::ScanProgressHandle;
 /// Tauri dev's file watcher rebuilds whenever any file under `src-tauri/`
 /// changes. SQLite in WAL mode constantly rewrites `.db-wal` and
 /// `.db-shm`, so a DB anywhere under the project triggers an infinite
-/// rebuild loop. Default location is `<user-home>/mikerust-data/mike.db`
+/// rebuild loop. Default location is the product database inside the
+/// per-user data folder (see `crate::product::database_path`)
 /// — overridable via `DATABASE_URL` for tests / CI.
 fn default_db_url() -> String {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    let path = PathBuf::from(home).join("mikerust-data").join("mike.db");
+    let path = crate::product::database_path();
     // SQLite URI on Windows requires forward slashes after `sqlite:`.
     format!("sqlite:{}", path.display().to_string().replace('\\', "/"))
 }
@@ -118,7 +116,7 @@ pub struct AppState {
     pub scans: Arc<RwLock<HashMap<String, ScanProgressHandle>>>,
 
     /// JSON-driven corpus plugin registry, loaded once at startup from
-    /// `MRUST_CORPUS_PLUGINS_DIR` (or walks ancestors for `corpora-plugins`
+    /// `COVE_CORPUS_PLUGINS_DIR` (or walks ancestors for `corpora-plugins`
     /// by default). Read by the `/corpora` endpoint and by the chat
     /// library-inventory builder. Empty when no manifest directory
     /// exists — the hardcoded EUR-Lex / Italian routes still work,
@@ -202,7 +200,7 @@ impl AppState {
         let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| default_db_url());
 
         // SQLite won't auto-create the parent directory; do it explicitly
-        // so `<user-home>/mikerust-data/` exists on first run.
+        // so `<user-home>/cove-studio-data/` exists on first run.
         if let Some(file_path) = db_url.strip_prefix("sqlite:") {
             // Strip query string if any (e.g. ?mode=rwc) before mkdir.
             let raw = file_path.split('?').next().unwrap_or(file_path);

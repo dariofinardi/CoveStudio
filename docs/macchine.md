@@ -60,7 +60,7 @@ I clienti sono prevalentemente officine (PMI e grandi reti/flotte), potenzialmen
 
 Automatizzare i processi di **validazione, analisi, generazione e confronto** della documentazione tecnica regolatoria tramite un set strutturato di prompt per GenAI su piattaforma **mikerust**.
 
-**Formati supportati in input da mikerust:**
+**Formati supportati in input da Cove Studio:**
 
 | Formato | Supportato |
 |---------|-----------|
@@ -73,7 +73,7 @@ Automatizzare i processi di **validazione, analisi, generazione e confronto** de
 
 Le **lingue di lavoro primarie** sono italiano e inglese. Le altre lingue (per manuali destinati ad altri mercati UE) sono sempre derivate da questi master.
 
-Il RAG di mikerust contiene già i testi completi di tutte le normative di riferimento, le FAQ ufficiali e le guidance degli organismi notificati. I prompt non devono allegare le norme ma devono referenziarle esplicitamente per articolo e allegato.
+Il RAG di Cove Studio contiene già i testi completi di tutte le normative di riferimento, le FAQ ufficiali e le guidance degli organismi notificati. I prompt non devono allegare le norme ma devono referenziarle esplicitamente per articolo e allegato.
 
 ---
 
@@ -190,7 +190,7 @@ Output: **testo strutturato Markdown** con sezioni, evidenziazione gap e anomali
 
 ### CATEGORIA B — Workflow Tabular (Checklist Binarie)
 
-Output: **tabella strutturata** (Markdown o CSV, formato nativo mikerust).
+Output: **tabella strutturata** (Markdown o CSV, formato nativo di Cove Studio).
 
 **Schema colonne standard per tutte le checklist B:**
 
@@ -1395,7 +1395,7 @@ Segnala le aree di sovrapposizione con il flag [MULTI-NORMA].
 
 Quando si scrivono i prompt, le seguenti condizioni sono sempre da considerarsi soddisfatte:
 
-1. **Il RAG di mikerust** contiene i testi completi di tutte le normative elencate in §3, incluse FAQ ufficiali e guidance degli organismi notificati e degli organismi di normazione.
+1. **Il RAG di Cove Studio** contiene i testi completi di tutte le normative elencate in §3, incluse FAQ ufficiali e guidance degli organismi notificati e degli organismi di normazione.
 
 2. **I tool disponibili** includono tutti quelli descritti in §10, più tool base per lettura, scrittura e conversione di file.
 
@@ -1516,8 +1516,8 @@ Ordine suggerito in base a urgenza normativa e utilità operativa immediata:
 | **CVSS** | Common Vulnerability Scoring System — scala di severità vulnerabilità (v3.1 e v4.0) |
 | **EPSS** | Exploit Prediction Scoring System — probabilità di exploit nei 30 giorni (0.0–1.0) |
 | **CISA KEV** | Known Exploited Vulnerabilities — lista CISA di vulnerabilità attivamente sfruttate |
-| **RAG** | Retrieval-Augmented Generation — knowledge base normativo integrato in mikerust |
-| **mikerust** | Piattaforma GenAI per l'esecuzione dei workflow documentali |
+| **RAG** | Retrieval-Augmented Generation — knowledge base normativo integrato in Cove Studio |
+| **Cove Studio** | Piattaforma GenAI per l'esecuzione dei workflow documentali |
 | **Function calling** | Modalità di invocazione tool da parte del LLM (Anthropic/OpenAI style) |
 | **MCP** | Model Context Protocol — protocollo per plugin tool esterni |
 | **HRN** | Hazard Rating Number — metodo quantitativo di stima del rischio |
@@ -1540,6 +1540,6 @@ Ordine suggerito in base a urgenza normativa e utilità operativa immediata:
 
 *Versione: 2.2 — Maggio 2026*
 *Normativa: Dir. 2006/42/CE · Reg. 2023/1230 · CRA 2024/2847 · RED 2014/53/UE · NIS2 2022/2555 · D.Lgs. 138/2024*
-*Piattaforma: mikerust — function calling nativo o MCP plugin*
+*Piattaforma: Cove Studio — function calling nativo o MCP plugin*
 *Database CVE: NVD NIST — nvd.nist.gov/developers/vulnerabilities*
 *Standard SBOM: CycloneDX 1.5+ / SPDX 2.3+*

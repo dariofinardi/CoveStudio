@@ -30,7 +30,7 @@ pub struct WorkflowColumn {
 }
 
 /// One workflow preset loaded from JSON. The shape projects directly
-/// into the MikeRust workflow JSON the `/workflow` endpoint emits — the
+/// into the Cove Studio workflow JSON the `/workflow` endpoint emits — the
 /// only extra fields on the wire (`is_system`, `created_at`,
 /// `user_id`) are synthesised by the route handler when it merges
 /// presets into a list response, so they don't appear here.

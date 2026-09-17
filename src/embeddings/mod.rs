@@ -1,4 +1,4 @@
-//! RAG (Retrieval-Augmented Generation) layer for MikeRust.
+//! RAG (Retrieval-Augmented Generation) layer for Cove Studio.
 //!
 //! Pipeline:
 //! 1. **Scan** — walk the user-configured folder tree (`sync` module),

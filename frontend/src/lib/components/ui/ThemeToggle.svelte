@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!-- Segmented light / system / dark control bound to the theme store. -->
 <script lang="ts">
   import { themeStore, type ThemeMode } from '$lib/stores/theme.svelte'

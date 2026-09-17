@@ -3,10 +3,10 @@ members = [".", "src-tauri"]
 resolver = "2"
 
 [package]
-name = "mike"
-version = "0.7.5"
+name = "cove-studio"
+version = "0.8.0"
 edition = "2024"
-description = "Mike local — sovereign AI document assistant"
+description = "Cove Studio — private, local AI assistant for professional document work"
 
 # ------------------------------------------------------------------
 # Web framework
@@ -31,7 +31,7 @@ argon2 = "0.5"
 rand_core_06 = { package = "rand_core", version = "0.6", features = ["getrandom"] }
 # Session tokens are opaque UUIDs stored in SQLite — no JWT needed for local use
 
-# .mikeprj export envelope: AES-256-GCM with key derived from recipient
+# Project archive (.coveprj) export envelope: AES-256-GCM with key derived from recipient
 # email via Argon2id. Sha2 needed to fingerprint the email (we only ship
 # the hash, not the email itself).
 aes-gcm = "0.10"
@@ -44,7 +44,7 @@ sha2 = "0.10"
 # HuggingFace on first use. We default to the multilingual-e5-base
 # variant (768 dims, 512 max tokens) which works well for IT/EN legal
 # text. Optional feature gate so devs without ort/onnxruntime libs can
-# still build the rest of MikeRust.
+# still build the rest of Cove Studio.
 #
 # Dynamic-load mode targeting onnxruntime 1.24.2 (the version ort
 # 2.0.0-rc.12 statically links against — confirmed via the
@@ -77,7 +77,7 @@ ort = { version = "=2.0.0-rc.9", optional = true, default-features = false, feat
     "load-dynamic",
 ] }
 # Vector store via the sqlite-vec extension. Same SQLite file as the
-# rest of MikeRust (mike.db) — atomic transactions, single backup,
+# rest of Cove Studio (cove-studio.db) — atomic transactions, single backup,
 # no extra daemon, no protoc. Brute-force cosine in C with SIMD;
 # fast up to ~500k vectors which is well above any single-firm needs.
 sqlite-vec = { version = "0.1", optional = true }
@@ -106,7 +106,7 @@ regex = "1"
 # from git (Apache-2.0). The model itself (`SemplificaAI/gliner2-
 # privacy-filter-PII-multi`) is downloaded on first use via the
 # crate's hf-hub dependency; HF_HOME is redirected to
-# %USERPROFILE%/mikerust-data/gliner2/ at server startup so the
+# %USERPROFILE%/cove-studio-data/gliner2/ at server startup so the
 # weights live next to the other heavy artefacts (fastembed, whisper).
 #
 # ort 2.0.0-rc.9 is the same pin we already use for embeddings —
@@ -172,12 +172,12 @@ tokio-stream = "0.1"
 bytes = "1"
 # Ollama client — used by the "Modalità sicura locale" plug-and-play
 # flow in src/llm/ollama_manager.rs to probe Ollama, list installed
-# models, stream `pull` progress, and create the curated `mike-…-fast`
+# models, stream `pull` progress, and create the local-models catalogue
 # variants from inline Modelfiles. Talks to the same loopback Ollama
 # the rest of the local provider hits (default
 # http://localhost:11434).
 ollama-rs = { version = "0.3", features = ["stream"] }
-# Idiomatic `async { yield … }` syntax for the ensure_curated streaming
+# Idiomatic `async { yield … }` syntax for the ollama_manager::ensure streaming
 # helper. ollama-rs has no opinion on how callers shape its output
 # stream; `async-stream` lets us turn a sequential `pull → create`
 # imperative flow into a single `Stream<Item = EnsureEvent>` that the

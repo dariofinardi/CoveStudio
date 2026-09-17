@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 /**
  * i18n store (plan §14). English is the canonical locale and the
@@ -7,10 +7,11 @@
  * All six dictionaries are imported statically and bundled — for a
  * desktop app the ~35 KB/locale cost is negligible and it avoids
  * async locale-loading flicker. The translation files themselves are
- * reused from the previous MikeRust frontend (frontendMike/messages),
+ * reused from the previous Cove Studio frontend (frontendMike/messages),
  * which is original work of the project owner (plan §14.1).
  */
 
+import { PRODUCT_PLACEHOLDERS } from '$lib/product'
 import { DEFAULT_LOCALE, isLocale, type Locale } from '$lib/types/user'
 import en from '../../../locales/en.json'
 import it from '../../../locales/it.json'
@@ -71,10 +72,8 @@ function createI18n() {
      */
     t(key: string, params?: Record<string, string | number>): string {
       let raw = resolve(dict, key) ?? resolve(fallback, key) ?? key
-      if (params) {
-        for (const [k, v] of Object.entries(params)) {
-          raw = raw.replaceAll(`{${k}}`, String(v))
-        }
+      for (const [k, v] of Object.entries({ ...PRODUCT_PLACEHOLDERS, ...params })) {
+        raw = raw.replaceAll(`{${k}}`, String(v))
       }
       return raw
     },

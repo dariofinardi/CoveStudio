@@ -166,11 +166,11 @@ pub struct LocalConfig {
     pub model: String,
     /// "Modalità sicura locale" — when true, the local provider
     /// refuses any base_url that isn't loopback and any model id that
-    /// isn't on the curated allowlist in
-    /// [`crate::llm::ollama_manager::CURATED_MODELS`]. It also
+    /// isn't in the local-models catalogue
+    /// (`config/local-models/ollama.json`). It also
     /// prepends a no-thinking preamble to the system prompt as a
     /// belt-and-braces safety net for any model that wasn't created
-    /// via Mike's Modelfile derivation. Default false on installs
+    /// via the catalogue Modelfile derivation. Default false on installs
     /// without the v0.5.6 migration (the migration ALTER TABLE pins
     /// the default to 0).
     pub secure_mode: bool,
@@ -220,7 +220,7 @@ pub struct StreamParams {
     /// (Some(uuid) on the user-driven /chat path), None for one-shot
     /// callers like title generation, HyDE, or summarisation. Used by
     /// the Mistral provider to derive a stable `prompt_cache_key`
-    /// (`mike_chat_{chat_id}`) — Mistral charges 10% of normal token
+    /// (`covestudio_chat_{chat_id}`) — Mistral charges 10% of normal token
     /// price on cache hits, which on long legal conversations with
     /// stable system prompt + attached documents is a 70-90% cost
     /// reduction. None disables caching for that call.

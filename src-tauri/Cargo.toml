@@ -1,14 +1,14 @@
 [package]
-name = "mike-tauri"
-version = "0.7.5"
+name = "cove-studio-desktop"
+version = "0.8.0"
 edition = "2024"
 
 [lib]
-name = "mike_tauri_lib"
+name = "cove_studio_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "mike-tauri"
+name = "cove-studio"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -16,7 +16,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = ["devtools"] }
-# `rag` rides in via the `mike` crate's default features
+# `rag` rides in via the `cove_studio` crate's default features
 # (`default = ["local-storage", "rag"]`).
 #
 # ⚠ Do NOT add "rag-qnn" here with the default embedding model.
@@ -32,7 +32,7 @@ tauri = { version = "2", features = ["devtools"] }
 # working baseline; on ARM64 Snapdragon X Elite per-query embed is
 # 50-100 ms which is invisible to the user. The performance lap
 # back to QNN is tracked in Phase 1.A.4 (lap B).
-mike = { path = "..", features = ["pdf", "ner-pii", "rag-directml"] }
+cove-studio = { path = "..", features = ["pdf", "ner-pii", "rag-directml"] }
 windows-future = "0.2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
@@ -44,7 +44,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # ort::init…) used to vanish into the void — a failure before
 # `axum::serve` left the user with a generic "Failed to fetch" screen
 # and no way to diagnose it. tracing-appender now writes the same
-# event stream to `<home>/mikerust-data/mike-tauri.log` so a crashing
+# event stream to `<home>/cove-studio-data/cove-studio.log` so a crashing
 # install can be triaged from the log file directly.
 tracing-appender = "0.2"
 anyhow = "1"

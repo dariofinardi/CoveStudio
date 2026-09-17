@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <script lang="ts">
   import Badge from '$lib/components/ui/Badge.svelte'
   import Logo from '$lib/components/ui/Logo.svelte'
@@ -41,7 +41,14 @@
     const c =
       (message.citations ?? []).find((x) => x.ref === ref) ??
       priorCitations.find((x) => x.ref === ref)
-    if (c) docViewer.openCitation(c)
+    if (!c) return
+    // Nothing fetchable behind this pill (unresolved `doc-N` label):
+    // opening a tab would only show a 404 and a false "source removed".
+    if (!c.docId && !c.kbPath) {
+      console.warn('[chat] citation without a resolvable document, not opening', c.ref)
+      return
+    }
+    docViewer.openCitation(c)
   }
 
   function onBodyClick(e: MouseEvent) {

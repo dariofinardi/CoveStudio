@@ -1,6 +1,8 @@
-MikeRust frontend
-=================
-Copyright (c) 2026 MikeRust contributors.
+Cove Studio frontend
+====================
+Copyright (c) 2026 Dario Finardi.
+Some interface strings in locales/ derive from Mike (github.com/willchen96/mike),
+copyright Will Chen and the Mike contributors, AGPL-3.0; see ../NOTICE.md.
 
 This product is licensed under the GNU Affero General Public License,
 version 3.0 only (AGPL-3.0-only). See LICENSE for the full terms.

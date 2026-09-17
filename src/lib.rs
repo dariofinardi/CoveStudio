@@ -2,15 +2,17 @@ pub mod auth;
 pub mod corpora;
 pub mod db;
 pub mod docx;
+pub mod document_segments;
 pub mod domain;
 pub mod embeddings;
 pub mod http_client;
 pub mod llm;
 pub mod mcp;
-pub mod mikeprj;
+pub mod project_archive;
 pub mod ner;
 pub mod pdf;
 pub mod presets;
+pub mod product;
 pub mod routes;
 pub mod storage;
 pub mod sync;
@@ -83,7 +85,7 @@ fn load_dotenv() {
 /// trigger the file watcher repeatedly during the download.
 ///
 /// Honours `FASTEMBED_CACHE_DIR` if the user already set it in `.env`;
-/// otherwise points at `<userdata>/mikerust-data/fastembed`. Either
+/// otherwise points at `<userdata>/cove-studio-data/fastembed`. Either
 /// way the directory is created so fastembed doesn't fail on first
 /// `try_new`.
 ///
@@ -93,12 +95,7 @@ fn ensure_fastembed_cache_dir() {
     if std::env::var("FASTEMBED_CACHE_DIR").is_ok() {
         return;
     }
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    let path = std::path::PathBuf::from(home)
-        .join("mikerust-data")
-        .join("fastembed");
+    let path = crate::product::data_subdir("fastembed");
     let _ = std::fs::create_dir_all(&path);
     // SAFETY: single-threaded process startup before the runtime spins
     // up — no concurrent reads of std::env to race with.
@@ -110,7 +107,7 @@ fn ensure_fastembed_cache_dir() {
 
 /// Pin `hf-hub`'s cache (used by `gliner2_inference` and any other
 /// HuggingFace downloader we add later) under
-/// `~/mikerust-data/gliner2/` so the ~500 MB GLiNER2 weights live
+/// `~/cove-studio-data/gliner2/` so the ~500 MB GLiNER2 weights live
 /// next to the rest of our heavy artefacts instead of leaking into
 /// the user's `~/.cache/huggingface/` directory. Honours an existing
 /// `HF_HOME` env var so power users keep control.
@@ -119,12 +116,7 @@ fn ensure_hf_cache_dir() {
     if std::env::var("HF_HOME").is_ok() {
         return;
     }
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    let path = std::path::PathBuf::from(home)
-        .join("mikerust-data")
-        .join("gliner2");
+    let path = crate::product::data_subdir("gliner2");
     let _ = std::fs::create_dir_all(&path);
     // SAFETY: single-threaded process startup, same as
     // ensure_fastembed_cache_dir above.
@@ -159,10 +151,10 @@ fn install_panic_hook() {
             .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column()))
             .unwrap_or_else(|| "<unknown location>".to_string());
         tracing::error!(
-            target: "mike::panic",
+            target: "cove_studio::panic",
             thread = %name,
             location = %location,
-            "panic in mike: {payload}"
+            "panic in cove_studio: {payload}"
         );
         default(info);
     }));
@@ -182,7 +174,7 @@ pub async fn run_server_with_channels(
     // One-shot startup line so a "PII not redacting" report can be
     // diagnosed from the dev log without having to read cargo args:
     // the bool here is the ACTUAL state of each feature in this
-    // binary, evaluated at compile time inside the mike crate.
+    // binary, evaluated at compile time inside the cove_studio crate.
     tracing::info!(
         "[startup] features compiled in: rag={} pdf={} ner-pii={} audio-transcription={}",
         cfg!(feature = "rag"),
@@ -206,7 +198,7 @@ pub async fn run_server_with_channels(
     // dependency, so the symbol is in scope.
     #[cfg(any(feature = "rag", feature = "ner-pii"))]
     {
-        if let Err(e) = ort::init().with_name("MikeRust").commit() {
+        if let Err(e) = ort::init().with_name(crate::product::NAME).commit() {
             // Non-fatal: a re-init from a different code path or
             // a feature-flag combination that double-initialises
             // would just produce a hard error. We log and let the
@@ -248,9 +240,8 @@ pub async fn run_server_with_channels(
     // the bearer token from `localStorage` if a user ever opens the
     // backend port in a regular browser tab.
     //
-    // Override at runtime with `MRUST_ALLOWED_ORIGINS=https://x,https://y`.
-    let allowlist: Vec<axum::http::HeaderValue> = std::env::var("MRUST_ALLOWED_ORIGINS")
-        .ok()
+    // Override at runtime with `COVE_ALLOWED_ORIGINS=https://x,https://y`.
+    let allowlist: Vec<axum::http::HeaderValue> = crate::product::env_var("ALLOWED_ORIGINS")
         .map(|s| {
             s.split(',')
                 .map(|p| p.trim().to_string())

@@ -5,7 +5,7 @@
         "it": "Argentina — InfoLEG",
         "en": "Argentina — InfoLEG"
     },
-    "description": "Normativa argentina (InfoLEG). Fonte registrata per roadmap country-by-country; integrazione runtime dedicata ancora non attiva in MikeRust.",
+    "description": "Normativa argentina (InfoLEG). Fonte registrata per roadmap country-by-country; integrazione runtime dedicata ancora non attiva in Cove Studio.",
     "homepage": "https://servicios.infoleg.gob.ar/infolegInternet/",
     "languages": ["es"],
     "default_language": "es",

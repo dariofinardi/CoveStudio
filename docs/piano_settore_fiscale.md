@@ -126,7 +126,7 @@ tributaria, da affiancare (in futuro) come corpora del settore:
 | **Documentazione Economica e Finanziaria (MEF)** | def.finanze.it | Banca dati gratuita: normativa tributaria, **prassi** (circolari/risoluzioni AdE), **giurisprudenza tributaria** (Cassazione e Corti di Giustizia Tributaria) |
 | **Sentenze Web Cassazione** | sentenze.cortedicassazione.it | Massime e testi delle sentenze civili/tributarie della Corte di Cassazione |
 | **Giustizia Tributaria (DGT-MEF)** | def.finanze.it/DocTribFrontend | Banca dati delle decisioni delle Corti di Giustizia Tributaria di primo e secondo grado |
-| **EUR-Lex** | eur-lex.europa.eu | Direttiva IVA 2006/112/CE e normativa UE rilevante (già integrato in MikeRust come corpus) |
+| **EUR-Lex** | eur-lex.europa.eu | Direttiva IVA 2006/112/CE e normativa UE rilevante (già integrato in Cove Studio come corpus) |
 | **Agenzia delle Entrate** | agenziaentrate.gov.it | Modelli, istruzioni, codici tributo, interpelli pubblicati |
 
 > Nota di prodotto: l'integrazione di `def.finanze.it` e

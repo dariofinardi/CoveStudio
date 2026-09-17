@@ -5,7 +5,7 @@
         "it": "Francia — Légifrance",
         "en": "France — Légifrance"
     },
-    "description": "Normativa francese (Légifrance / PISTE OAuth2). Fonte già registrata in UI; connettore runtime non ancora attivo in MikeRust.",
+    "description": "Normativa francese (Légifrance / PISTE OAuth2). Fonte già registrata in UI; connettore runtime non ancora attivo in Cove Studio.",
     "homepage": "https://www.legifrance.gouv.fr/",
     "languages": ["fr"],
     "default_language": "fr",

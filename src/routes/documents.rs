@@ -783,7 +783,7 @@ async fn display_document(
 // GET /document/:id/download — same bytes as /display but with
 // `Content-Disposition: attachment` so a plain browser navigation
 // triggers the OS save dialog. Used by the chat's download card to
-// hand a generated .docx / .xlsx / … out of MikeRust as a normal file
+// hand a generated .docx / .xlsx / … out of Cove Studio as a normal file
 // the user can keep, mail, archive, etc. The /display sibling stays
 // `inline` because the in-app PDF.js / docx-preview viewers need the
 // webview to render the bytes in place rather than save them.
@@ -874,7 +874,7 @@ fn mime_for_extension(ext: &str) -> &'static str {
 
 // ---------------------------------------------------------------------------
 // GET /document/:id/url — frontend convenience: returns a URL the viewer
-// can fetch later. In MikeRust it's just an absolute /display URL because
+// can fetch later. In Cove Studio it's just an absolute /display URL because
 // storage is local; remote-storage backends could return a presigned URL.
 // ---------------------------------------------------------------------------
 async fn get_document_url(

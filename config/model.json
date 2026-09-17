@@ -1,6 +1,6 @@
 {
     "$schema_version": 1,
-    "_note": "Catalogue of LLM providers, models and regions MikeRust can talk to. Loaded at startup (planned: `crate::presets::model`). Source of truth lives on disk — drop a new entry, restart, available models update in the Settings → Modelli LLM page. Preview models are global-only by spec (Anthropic/Google/OpenAI): the consumer code gates the region selector accordingly when `preview: true` is set on the model.",
+    "_note": "Catalogue of LLM providers, models and regions Cove Studio can talk to. Loaded at startup (planned: `crate::presets::model`). Source of truth lives on disk — drop a new entry, restart, available models update in the Settings → Modelli LLM page. Preview models are global-only by spec (Anthropic/Google/OpenAI): the consumer code gates the region selector accordingly when `preview: true` is set on the model.",
     "providers": [
         {
             "id": "anthropic",
@@ -137,6 +137,34 @@
                 { "id": "me-central2",       "display_name": "Medio Oriente — Dammam (me-central2)" }
             ],
             "models": [
+                {
+                    "id": "gemini-3.8-flash",
+                    "display_name": "Gemini 3.8 Flash",
+                    "family": "gemini-3.8",
+                    "tier": "standard",
+                    "context_window": 1048576,
+                    "max_output_tokens": 65536,
+                    "supports_vision": true,
+                    "supports_tools": true,
+                    "supports_streaming": true,
+                    "supports_thinking": true,
+                    "preview": false,
+                    "_release_note": "Latest Flash of the Gemini 3 family (docs updated 2026-09). Text/image/video/audio/PDF in, text out; thinking low/medium/high (no minimal); no Live API."
+                },
+                {
+                    "id": "gemini-3.7-flash",
+                    "display_name": "Gemini 3.7 Flash",
+                    "family": "gemini-3.7",
+                    "tier": "standard",
+                    "context_window": 1048576,
+                    "max_output_tokens": 65536,
+                    "supports_vision": true,
+                    "supports_tools": true,
+                    "supports_streaming": true,
+                    "supports_thinking": true,
+                    "preview": false,
+                    "_release_note": "Agentic workhorse of the Gemini 3 family (docs latest update 2026-08). Known upstream quirk: some requests are rejected against an undocumented 32,768-token ceiling that does not match countTokens; if that happens, fall back to 3.8 or 3.5 Flash."
+                },
                 {
                     "id": "gemini-3.5-flash",
                     "display_name": "Gemini 3.5 Flash",
@@ -548,7 +576,7 @@
                     "preview": false
                 },
                 {
-                    "id": "mikerust-qwen35-4b:ctx16k",
+                    "id": "covestudio-qwen35-4b:ctx16k",
                     "display_name": "Qwen 3.5 4B (Local tuned 16K)",
                     "family": "qwen3.5",
                     "tier": "fast",
@@ -562,7 +590,7 @@
                     "preview": false
                 },
                 {
-                    "id": "mikerust-qwen35-9b:ctx8k",
+                    "id": "covestudio-qwen35-9b:ctx8k",
                     "display_name": "Qwen 3.5 9B (Local tuned 8K)",
                     "family": "qwen3.5",
                     "tier": "standard",
@@ -576,7 +604,7 @@
                     "preview": false
                 },
                 {
-                    "id": "mikerust-gemma4-e2b:ctx8k",
+                    "id": "covestudio-gemma4-e2b:ctx8k",
                     "display_name": "Gemma 4 e2b (Local tuned 8K)",
                     "family": "gemma4",
                     "tier": "fast",

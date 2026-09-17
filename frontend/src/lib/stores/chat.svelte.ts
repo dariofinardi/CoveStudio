@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 import { chatApi, streamChat } from '$lib/api/chat'
 import { modelsStore } from '$lib/stores/models.svelte'

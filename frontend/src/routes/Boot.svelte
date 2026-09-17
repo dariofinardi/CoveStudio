@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Presentational boot screen. The boot sequence itself (port discovery,
   /healthz probe, /auth/status) lives in App.svelte; this just renders

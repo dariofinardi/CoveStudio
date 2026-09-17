@@ -36,7 +36,7 @@
 #![allow(clippy::collapsible_else_if)]
 
 use axum::{body::Body, http::Request, http::StatusCode};
-use mike::AppState;
+use cove_studio::AppState;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -118,7 +118,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
     let url = format!("sqlite://{}?mode=rwc", db_path.display().to_string().replace('\\', "/"));
 
     #[cfg(feature = "rag")]
-    mike::embeddings::register_sqlite_vec_auto_extension();
+    cove_studio::embeddings::register_sqlite_vec_auto_extension();
 
     let pool = SqlitePoolOptions::new()
         .max_connections(4)
@@ -127,7 +127,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
         .expect("connect sqlite");
     sqlx::migrate!("./migrations").run(&pool).await.expect("migrate");
 
-    let sessions = mike::auth::SessionStore::new(pool.clone());
+    let sessions = cove_studio::auth::SessionStore::new(pool.clone());
     let state = AppState {
         db: pool,
         sessions,
@@ -143,7 +143,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
         corpus_import_progress: Default::default(),
         workflow_presets: Default::default(),
         column_presets: Default::default(),
-        model_catalogue: Arc::new(mike::presets::model::ModelCatalogue {
+        model_catalogue: Arc::new(cove_studio::presets::model::ModelCatalogue {
             schema_version: 1,
             providers: vec![],
         }),
@@ -152,7 +152,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
     let state = Arc::new(state);
 
     let app = axum::Router::new()
-        .nest("/chat", mike::routes::chat::router())
+        .nest("/chat", cove_studio::routes::chat::router())
         .with_state(state.clone());
 
     std::mem::forget(dir); // keep storage alive for the duration of the test
@@ -232,7 +232,7 @@ async fn place_pdf_in_cache(
         std::fs::write(&bin_path, &bytes).expect("write cached binary");
     }
     if !txt_path.exists() {
-        let (text, _) = mike::sync::scanner::extract_text_dispatch(pdf_path, &bytes)
+        let (text, _) = cove_studio::sync::scanner::extract_text_dispatch(pdf_path, &bytes)
             .expect("pdfium text extract");
         std::fs::write(&txt_path, text.as_bytes()).expect("write cached text");
     }

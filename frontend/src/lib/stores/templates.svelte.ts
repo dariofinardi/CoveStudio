@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 import { templatesApi } from '$lib/api/templates'
 import type { DocxTemplate } from '$lib/types/template'

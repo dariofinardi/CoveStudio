@@ -492,11 +492,11 @@ async fn delete_project(
 // ---------------------------------------------------------------------------
 // POST /project/:id/export
 // Body: { recipient_email: string, include_chats?: bool }
-// Response: binary `.mikeprj` (encrypted zip)
+// Response: binary `.coveprj` (encrypted zip)
 //
 // The recipient_email is the address that will be used to derive the
-// AES key — only a MikeRust install where the active user's account is
-// registered with the same email can open the file. See `mikeprj/mod.rs`
+// AES key — only a Cove Studio install where the active user's account is
+// registered with the same email can open the file. See `project_archive/mod.rs`
 // for the (intentionally-weak) sharing model.
 // ---------------------------------------------------------------------------
 #[derive(Deserialize)]
@@ -524,11 +524,11 @@ async fn export_project(
     let storage: std::sync::Arc<Box<dyn crate::storage::Storage>> =
         std::sync::Arc::new(storage);
 
-    let payload = crate::mikeprj::io::build_payload(
+    let payload = crate::project_archive::io::build_payload(
         &state.db,
         &auth.user_id,
         &id,
-        crate::mikeprj::io::ExportOptions {
+        crate::project_archive::io::ExportOptions {
             include_chats: body.include_chats,
         },
         |key| {
@@ -542,12 +542,12 @@ async fn export_project(
 
     let project_basename = sanitize_filename(&payload.project.name);
 
-    let zip_bytes = crate::mikeprj::io::zip_payload(&payload)
+    let zip_bytes = crate::project_archive::io::zip_payload(&payload)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
-    let sealed = crate::mikeprj::crypto::seal(&body.recipient_email, &zip_bytes)
+    let sealed = crate::project_archive::crypto::seal(&body.recipient_email, &zip_bytes)
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
 
-    let filename = format!("{project_basename}.mikeprj");
+    let filename = crate::product::project_file_name(&project_basename);
     Ok((
         [
             (header::CONTENT_TYPE, "application/octet-stream".to_string()),
@@ -583,7 +583,7 @@ fn sanitize_filename(name: &str) -> String {
 
 // ---------------------------------------------------------------------------
 // POST /project/import   (multipart)
-//   - field `file`             : the .mikeprj bytes
+//   - field `file`             : the .coveprj bytes
 //   - field `recipient_email`  : the email to derive the AES key with —
 //                                must match the one used at export time
 //
@@ -632,9 +632,9 @@ async fn import_project(
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "missing 'recipient_email' field"))?;
 
     // Decrypt + unzip
-    let zip_bytes = crate::mikeprj::crypto::open(&recipient_email, &file_bytes)
+    let zip_bytes = crate::project_archive::crypto::open(&recipient_email, &file_bytes)
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
-    let payload = crate::mikeprj::io::unzip_payload(&zip_bytes)
+    let payload = crate::project_archive::io::unzip_payload(&zip_bytes)
         .map_err(|e| err(StatusCode::BAD_REQUEST, &e.to_string()))?;
 
     // Create the new project under the importer's account. v0.5.4
@@ -838,60 +838,94 @@ async fn import_project(
 // PATCH /project/:id/documents/:doc_id  — rename a project document
 // ---------------------------------------------------------------------------
 //
-// Mirror of upstream willchen96/mike `f39f175` endpoint
-// PATCH /projects/:projectId/documents/:documentId. Scope-reduced for
-// MikeRust's leaner schema:
-//   - Upstream also bumps documents.updated_at and propagates
-//     document_versions.display_name on current_version_id. MikeRust's
-//     documents table has no updated_at column and document_versions
-//     has no display_name; both are upstream-only additions to a
-//     larger version-tracking pipeline we haven't ported. The rename
-//     here updates only `documents.filename`.
-//   - Ownership is enforced via (id, project_id, user_id) on the
-//     UPDATE so a caller can't rename someone else's doc by guessing
-//     UUIDs (the same defense MikeRust uses for project-level edits).
+// The name chosen by the user is cleaned up and completed with the
+// extension of the file's real type (`documents.file_type`), not the one
+// of the previous name: renaming doesn't change the content, so the
+// extension must keep describing it. Ownership is checked on
+// (id, project_id, user_id) in both queries.
 
 #[derive(Deserialize)]
 struct RenameDocumentBody {
     filename: String,
 }
 
-/// Normalise a user-supplied filename:
-///   - trim whitespace, cap at 200 chars
-///   - reject empty after trim
-///   - preserve the current extension when the new name has no
-///     extension (avoids accidental "report" overwriting "report.pdf")
-fn normalize_document_filename(
-    next_name: &str,
-    current_name: &str,
-) -> Option<String> {
-    let trimmed: String = next_name.trim().chars().take(200).collect();
-    if trimmed.is_empty() {
+/// Characters not allowed in file names on Windows, macOS or Linux.
+const RESERVED_FILENAME_CHARS: [char; 9] = ['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+
+/// Maximum length of the name part before the extension.
+const MAX_NAME_STEM_CHARS: usize = 180;
+
+/// Extensions matching a `file_type`, the preferred one first.
+/// Empty for `other`: in that case the current name's extension applies.
+fn extensions_for_file_type(file_type: &str) -> &[&str] {
+    match file_type {
+        "jpeg" => &["jpeg", "jpg"],
+        "tiff" => &["tiff", "tif"],
+        "pdf" => &["pdf"],
+        "docx" => &["docx"],
+        "rtf" => &["rtf"],
+        "xlsx" => &["xlsx"],
+        "xls" => &["xls"],
+        "xlsb" => &["xlsb"],
+        "ods" => &["ods"],
+        "csv" => &["csv"],
+        "txt" => &["txt"],
+        "md" => &["md"],
+        _ => &[],
+    }
+}
+
+/// Builds the name to store from the requested name, the current
+/// name and the file type. `None` if nothing is left after cleanup.
+fn compose_document_name(requested: &str, current: &str, file_type: &str) -> Option<String> {
+    let current_ext = std::path::Path::new(current)
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+
+    // Keep the variant already in use (`jpg` stays `jpg`), otherwise
+    // the type's canonical one.
+    let known = extensions_for_file_type(file_type);
+    let extension = match (&current_ext, known) {
+        (Some(ext), []) => Some(ext.clone()),
+        (Some(ext), known) if known.contains(&ext.as_str()) => Some(ext.clone()),
+        (_, [preferred, ..]) => Some((*preferred).to_string()),
+        (None, []) => None,
+    };
+
+    let sanitized: String = requested
+        .chars()
+        .filter(|c| !c.is_control())
+        .map(|c| if RESERVED_FILENAME_CHARS.contains(&c) { '_' } else { c })
+        .collect();
+    let mut stem = sanitized.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    // If the user already typed the type's extension, don't repeat it.
+    if let Some(ext) = &extension {
+        let lower = stem.to_ascii_lowercase();
+        let typed = std::iter::once(ext.as_str())
+            .chain(known.iter().copied())
+            .map(|e| format!(".{e}"))
+            .find(|suffix| lower.ends_with(suffix.as_str()));
+        if let Some(suffix) = typed {
+            stem.truncate(stem.len() - suffix.len());
+        }
+    }
+
+    let stem: String = stem
+        .trim_matches(|c: char| c == '.' || c.is_whitespace())
+        .chars()
+        .take(MAX_NAME_STEM_CHARS)
+        .collect();
+    let stem = stem.trim_end_matches(|c: char| c == '.' || c.is_whitespace());
+    if stem.is_empty() {
         return None;
     }
-    // Has its own extension? e.g. "report.pdf" or "X.docx"
-    let has_ext = trimmed
-        .rsplit_once('.')
-        .map(|(_, ext)| {
-            !ext.is_empty()
-                && ext.len() <= 6
-                && ext.chars().all(|c| c.is_ascii_alphanumeric())
-        })
-        .unwrap_or(false);
-    if has_ext {
-        return Some(trimmed);
-    }
-    // Append current extension if any.
-    let cur_ext = current_name
-        .rsplit_once('.')
-        .filter(|(_, e)| {
-            !e.is_empty()
-                && e.len() <= 6
-                && e.chars().all(|c| c.is_ascii_alphanumeric())
-        })
-        .map(|(_, e)| format!(".{e}"))
-        .unwrap_or_default();
-    Some(format!("{trimmed}{cur_ext}"))
+
+    Some(match extension {
+        Some(ext) => format!("{stem}.{ext}"),
+        None => stem.to_string(),
+    })
 }
 
 async fn rename_project_document(
@@ -900,12 +934,10 @@ async fn rename_project_document(
     Path((project_id, doc_id)): Path<(String, String)>,
     Json(body): Json<RenameDocumentBody>,
 ) -> ApiResult {
-    // Confirm the doc belongs to this project + this user before we
-    // accept the new name. Returns the current filename so the
-    // normaliser can preserve its extension if the user only typed a
-    // bare name.
-    let current: Option<(String,)> = sqlx::query_as(
-        "SELECT filename FROM documents \
+    let internal = |e: sqlx::Error| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string());
+
+    let (current, file_type): (String, String) = sqlx::query_as(
+        "SELECT filename, file_type FROM documents \
          WHERE id = ? AND project_id = ? AND user_id = ?",
     )
     .bind(&doc_id)
@@ -913,93 +945,97 @@ async fn rename_project_document(
     .bind(&auth.user_id)
     .fetch_optional(&state.db)
     .await
-    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    .map_err(internal)?
+    .ok_or_else(|| err(StatusCode::NOT_FOUND, "Document not found"))?;
 
-    let (current_filename,) = current
-        .ok_or_else(|| err(StatusCode::NOT_FOUND, "Document not found"))?;
-
-    let new_filename = normalize_document_filename(&body.filename, &current_filename)
+    let filename = compose_document_name(&body.filename, &current, &file_type)
         .ok_or_else(|| err(StatusCode::BAD_REQUEST, "filename is required"))?;
 
-    sqlx::query(
-        "UPDATE documents SET filename = ? \
-         WHERE id = ? AND project_id = ? AND user_id = ?",
-    )
-    .bind(&new_filename)
-    .bind(&doc_id)
-    .bind(&project_id)
-    .bind(&auth.user_id)
-    .execute(&state.db)
-    .await
-    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    if filename != current {
+        sqlx::query(
+            "UPDATE documents SET filename = ? \
+             WHERE id = ? AND project_id = ? AND user_id = ?",
+        )
+        .bind(&filename)
+        .bind(&doc_id)
+        .bind(&project_id)
+        .bind(&auth.user_id)
+        .execute(&state.db)
+        .await
+        .map_err(internal)?;
+    }
 
     Ok(Json(json!({
+        "ok": true,
         "id": doc_id,
-        "filename": new_filename,
         "project_id": project_id,
+        "filename": filename,
     })))
 }
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_document_filename;
+    use super::compose_document_name;
 
-    #[test]
-    fn normalize_keeps_user_supplied_extension() {
-        assert_eq!(
-            normalize_document_filename("report-final.pdf", "old.pdf").as_deref(),
-            Some("report-final.pdf"),
-        );
+    fn name(requested: &str, current: &str, file_type: &str) -> Option<String> {
+        compose_document_name(requested, current, file_type)
     }
 
     #[test]
-    fn normalize_appends_current_extension_when_missing() {
-        assert_eq!(
-            normalize_document_filename("report-final", "old.pdf").as_deref(),
-            Some("report-final.pdf"),
-        );
+    fn extension_follows_the_file_type() {
+        assert_eq!(name("Relazione finale", "bozza.pdf", "pdf").as_deref(), Some("Relazione finale.pdf"));
+        assert_eq!(name("Relazione finale.pdf", "bozza.pdf", "pdf").as_deref(), Some("Relazione finale.pdf"));
+        assert_eq!(name("Relazione.PDF", "bozza.pdf", "pdf").as_deref(), Some("Relazione.pdf"));
     }
 
     #[test]
-    fn normalize_appends_docx_extension() {
-        assert_eq!(
-            normalize_document_filename("Notes", "draft.docx").as_deref(),
-            Some("Notes.docx"),
-        );
+    fn a_different_extension_does_not_change_the_type() {
+        assert_eq!(name("contratto.docx", "contratto.pdf", "pdf").as_deref(), Some("contratto.docx.pdf"));
     }
 
     #[test]
-    fn normalize_trims_whitespace_and_caps_at_200() {
-        let huge: String = std::iter::repeat('a').take(250).collect();
-        let out = normalize_document_filename(&format!("   {huge}  "), "x.pdf")
-            .unwrap();
-        // 200 'a's plus ".pdf" appended (input has no extension).
-        assert_eq!(out.len(), 204);
-        assert!(out.starts_with('a'));
+    fn alias_extension_in_use_is_kept() {
+        assert_eq!(name("foto", "scan.jpg", "jpeg").as_deref(), Some("foto.jpg"));
+        assert_eq!(name("foto.jpeg", "scan.jpg", "jpeg").as_deref(), Some("foto.jpg"));
+        assert_eq!(name("pagina", "pagina1.tif", "tiff").as_deref(), Some("pagina.tif"));
+    }
+
+    #[test]
+    fn canonical_extension_when_current_name_has_none() {
+        assert_eq!(name("verbale", "upload", "docx").as_deref(), Some("verbale.docx"));
+    }
+
+    #[test]
+    fn other_types_keep_the_current_extension_or_none() {
+        assert_eq!(name("archivio", "dati.zip", "other").as_deref(), Some("archivio.zip"));
+        assert_eq!(name("appunti", "appunti", "other").as_deref(), Some("appunti"));
+    }
+
+    #[test]
+    fn reserved_and_control_characters_are_neutralised() {
+        assert_eq!(name("a/b\\c:d*e?", "x.pdf", "pdf").as_deref(), Some("a_b_c_d_e_.pdf"));
+        assert_eq!(name("riga\nnuova\ttab", "x.pdf", "pdf").as_deref(), Some("riganuovatab.pdf"));
+        assert_eq!(name("../../segreto", "x.pdf", "pdf").as_deref(), Some("_.._segreto.pdf"));
+    }
+
+    #[test]
+    fn whitespace_and_edge_dots_are_cleaned() {
+        assert_eq!(name("  Atto   di   citazione  ", "x.pdf", "pdf").as_deref(), Some("Atto di citazione.pdf"));
+        assert_eq!(name("...nota...", "x.txt", "txt").as_deref(), Some("nota.txt"));
+    }
+
+    #[test]
+    fn empty_names_are_rejected() {
+        for requested in ["", "   ", "...", ".pdf", " \u{7} "] {
+            assert_eq!(name(requested, "x.pdf", "pdf"), None, "input {requested:?}");
+        }
+    }
+
+    #[test]
+    fn long_names_are_capped_before_the_extension() {
+        let long = "è".repeat(400);
+        let out = name(&long, "x.pdf", "pdf").unwrap();
+        assert_eq!(out.chars().count(), super::MAX_NAME_STEM_CHARS + ".pdf".len());
         assert!(out.ends_with(".pdf"));
-    }
-
-    #[test]
-    fn normalize_rejects_empty() {
-        assert_eq!(normalize_document_filename("", "x.pdf"), None);
-        assert_eq!(normalize_document_filename("   ", "x.pdf"), None);
-    }
-
-    #[test]
-    fn normalize_handles_no_current_extension() {
-        // No source extension → user name kept as-is even if bare.
-        assert_eq!(
-            normalize_document_filename("untitled", "blob").as_deref(),
-            Some("untitled"),
-        );
-    }
-
-    #[test]
-    fn normalize_distinguishes_dot_in_middle_from_extension() {
-        // "my.file.v2" → ext is ".v2"; recognised as having extension.
-        assert_eq!(
-            normalize_document_filename("my.file.v2", "old.pdf").as_deref(),
-            Some("my.file.v2"),
-        );
     }
 }

@@ -17,7 +17,7 @@
 //!
 //! * **`prompt_cache_key`** — Mistral charges only 10% of normal
 //!   token price on cache hits. We derive a stable per-chat key
-//!   (`mike_chat_{chat_id}`) so the system prompt + attached
+//!   (`covestudio_chat_{chat_id}`) so the system prompt + attached
 //!   documents prefix is cached across turns. On a typical 20-turn
 //!   document-heavy legal conversation the cache hit rate is 80-90%,
 //!   for an effective cost reduction in the same range.
@@ -57,7 +57,7 @@ use crate::llm::BoxStream;
 /// 1s still produce 7 failures, then 6 after 2s, etc.
 ///
 /// The semaphore lives at module scope so it spans the whole
-/// MikeRust process — chat / tabular / HyDE / title gen all
+/// Cove Studio process — chat / tabular / HyDE / title gen all
 /// queue through the same gate. The cap of 1 is safe for
 /// Experiment tier (1 RPS) and only mildly underutilises paid
 /// Scale tier (typically 4-8 RPS); paid users rarely 429 anyway,
@@ -284,7 +284,7 @@ pub(crate) fn cache_key_for(params: &StreamParams) -> Option<String> {
         .chat_id
         .as_deref()
         .filter(|s| !s.is_empty())
-        .map(|cid| format!("mike_chat_{cid}"))
+        .map(|cid| format!("{}_chat_{cid}", crate::product::SLUG))
 }
 
 pub(crate) fn build_body(params: &StreamParams, model: &str, stream: bool) -> serde_json::Value {
@@ -527,7 +527,7 @@ mod tests {
         let p = params_with("k", "mistral-large-latest", Some("abc-123"));
         assert_eq!(
             cache_key_for(&p).as_deref(),
-            Some("mike_chat_abc-123"),
+            Some(format!("{}_chat_abc-123", crate::product::SLUG).as_str()),
         );
     }
 
@@ -558,7 +558,7 @@ mod tests {
     fn build_body_includes_cache_key_when_chat_scoped() {
         let p = params_with("k", "mistral-large-latest", Some("chat-xyz"));
         let body = build_body(&p, "mistral-large-latest", true);
-        assert_eq!(body["prompt_cache_key"], json!("mike_chat_chat-xyz"));
+        assert_eq!(body["prompt_cache_key"], json!(format!("{}_chat_chat-xyz", crate::product::SLUG)));
     }
 
     #[test]

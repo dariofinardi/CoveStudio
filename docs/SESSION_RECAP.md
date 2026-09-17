@@ -1,5 +1,10 @@
 # MikeRust — riepilogo sessione
 
+> **Historical record.** This recap describes MikeRust as of 8 May 2026,
+> when the project still used the Next.js frontend forked from Mike. That
+> frontend was replaced by the Svelte application on 17 May 2026 and the
+> project is now Cove Studio. For the current state see the README.
+
 > Cronistoria tecnica di quanto sviluppato in questa sessione, organizzata per area
 > con riferimenti puntuali ai file. Pensato come documento di "consegna" che
 > chiunque (o io stesso al prossimo giro) possa leggere senza ricostruire la

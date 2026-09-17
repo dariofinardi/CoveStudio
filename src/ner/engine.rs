@@ -10,7 +10,7 @@
 //!
 //! Cache layout: `hf-hub` (gliner2-rs transitive dep) drops the
 //! weights under `$HF_HOME/...`. We set `HF_HOME` to
-//! `%USERPROFILE%/mikerust-data/gliner2/` at server startup so the
+//! `%USERPROFILE%/cove-studio-data/gliner2/` at server startup so the
 //! ~500 MB model lives next to the other heavy artefacts (fastembed,
 //! whisper) and the Tauri watcher never sees it.
 

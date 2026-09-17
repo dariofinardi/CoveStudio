@@ -68,26 +68,14 @@ fn resolve_endpoint(params: &StreamParams) -> Result<(String, String, String)> {
                      solo a localhost (URL ricevuto: {base})."
                 ));
             }
-            // Ollama suffixes any tag-less model with `:latest` on
-            // creation/pull (e.g. `ollama create mike-gemma4-e2b-fast`
-            // lands as `mike-gemma4-e2b-fast:latest` in `ollama list`).
-            // The model id can therefore arrive here with the suffix
-            // even though the curated catalogue stores bare names —
-            // normalise before the contains check so the user's pick
-            // doesn't get rejected for a purely cosmetic mismatch.
-            // Bug surfaced 2026-06-07 immediately after the picker
-            // refresh path populated main_model from Ollama's
-            // tag-suffixed response.
-            let bare_model = model
-                .strip_suffix(":latest")
-                .unwrap_or(model.as_str());
-            if !crate::llm::ollama_manager::CURATED_MODELS
-                .iter()
-                .any(|m| m.id == bare_model)
-            {
+            // The model must be in the local-models catalogue, under its
+            // current name or a name from an earlier release not yet
+            // migrated. Ollama adds `:latest` to untagged models, so the
+            // comparison ignores that tag.
+            if crate::presets::local_models::find_including_legacy(&model).is_none() {
                 return Err(anyhow!(
                     "Modalità sicura locale attiva: il modello `{model}` non è \
-                     nell'allowlist dei modelli curati."
+                     nell'allowlist dei modelli locali."
                 ));
             }
             // Snap the URL to the canonical loopback form so logs /
@@ -177,12 +165,11 @@ struct ChatRequest {
 
 /// Compose the effective system prompt for a local call. When the
 /// user is in secure mode this prepends the no-think preamble before
-/// `params.full_system()` so any model that wasn't created via Mike's
-/// Modelfile (older Modelfile, stale ollama variant, …) still gets
-/// the "no chain-of-thought" instruction at the top of its system
-/// block. The curated `mike-…-fast` variants get this twice (once
-/// from their Modelfile SYSTEM, once from here) — harmless overlap,
-/// the model just reads the instruction first.
+/// `params.full_system()` so any model that wasn't created from the
+/// local-models catalogue (older derivation, stale Ollama variant, …)
+/// still gets the "no chain-of-thought" instruction at the top of its
+/// system block. Catalogue derivations may get it twice (once from
+/// their Modelfile, once from here) — harmless overlap.
 fn effective_system(params: &StreamParams) -> String {
     let base = params.full_system();
     let secure = params
@@ -478,6 +465,22 @@ mod tests {
     use super::*;
     use crate::llm::types::StreamEvent;
 
+    fn first_catalogue_model() -> String {
+        crate::presets::local_models::catalogue()[0].id.clone()
+    }
+
+    #[test]
+    fn secure_mode_accepts_a_legacy_name_not_yet_migrated() {
+        let Some(legacy) = crate::presets::local_models::catalogue()
+            .into_iter()
+            .find_map(|m| m.legacy_ids.first().cloned())
+        else {
+            return;
+        };
+        let p = params_with_local("http://localhost:11434", &legacy, true);
+        assert!(resolve_endpoint(&p).is_ok());
+    }
+
     fn params_with_local(
         base_url: &str,
         model: &str,
@@ -485,7 +488,7 @@ mod tests {
     ) -> StreamParams {
         StreamParams {
             model: model.to_string(),
-            system_prompt: "you are mike".into(),
+            system_prompt: "you are the assistant".into(),
             system_volatile: String::new(),
             messages: vec![Message::user("hi".to_string())],
             tools: vec![],
@@ -529,7 +532,7 @@ mod tests {
     fn secure_mode_rejects_non_loopback_url() {
         let p = params_with_local(
             "https://ollama.example.com",
-            "mike-qwen35-4b-fast",
+            &first_catalogue_model(),
             true,
         );
         let err = resolve_endpoint(&p).unwrap_err();
@@ -550,33 +553,33 @@ mod tests {
     fn secure_mode_accepts_curated_model_on_loopback() {
         let p = params_with_local(
             "http://localhost:11434",
-            "mike-gemma4-e2b-fast",
+            &first_catalogue_model(),
             true,
         );
         let (base, _key, model) = resolve_endpoint(&p).unwrap();
         // Base URL is snapped to the canonical loopback form.
         assert!(base.starts_with("http://localhost:11434"));
-        assert_eq!(model, "mike-gemma4-e2b-fast");
+        assert_eq!(model, first_catalogue_model());
     }
 
     #[test]
     fn secure_mode_accepts_curated_model_with_latest_suffix() {
         // Reproduces the 2026-06-07 false-positive rejection: the
         // free-form Settings refresh path saved `main_model =
-        // local:mike-gemma4-e2b-fast:latest` after reading Ollama's
+        // local:<model>:latest` after reading Ollama's
         // tag-suffixed local-model list. Without the strip_suffix
         // normalisation the allowlist contains check failed and the
         // chat composer flagged the model as "non in allowlist".
         let p = params_with_local(
             "http://localhost:11434",
-            "mike-gemma4-e2b-fast:latest",
+            &format!("{}:latest", first_catalogue_model()),
             true,
         );
         let (_base, _key, model) = resolve_endpoint(&p).unwrap();
         // We keep the original :latest on the way out — that's what
         // Ollama actually expects on the wire — but the allowlist
         // check normalises only for the membership test.
-        assert_eq!(model, "mike-gemma4-e2b-fast:latest");
+        assert_eq!(model, format!("{}:latest", first_catalogue_model()));
     }
 
     #[test]
@@ -591,19 +594,19 @@ mod tests {
     fn effective_system_prepends_preamble_in_secure_mode() {
         let p = params_with_local(
             "http://localhost:11434",
-            "mike-qwen35-4b-fast",
+            &first_catalogue_model(),
             true,
         );
         let s = effective_system(&p);
         assert!(s.starts_with("[Modalità sicura locale]"));
-        assert!(s.contains("you are mike"));
+        assert!(s.contains("you are the assistant"));
     }
 
     #[test]
     fn effective_system_unchanged_off_secure_mode() {
         let p = params_with_local("http://localhost:11434", "anything", false);
         let s = effective_system(&p);
-        assert_eq!(s, "you are mike");
+        assert_eq!(s, "you are the assistant");
     }
 
     #[test]

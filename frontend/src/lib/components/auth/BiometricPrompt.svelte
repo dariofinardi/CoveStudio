@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Full-screen overlay shown while a biometric verification is in flight.
   The actual Windows Hello / Touch ID dialog is driven by the Tauri shell

@@ -1,9 +1,10 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Projects screen. List + create + edit + delete over /project.
-  Export / import .mikeprj is a later phase.
+  Export / import of encrypted project files.
 -->
 <script lang="ts">
+  import { PROJECT_FILE_ACCEPT, isProjectFileName, projectFileName } from '$lib/product'
   import Badge from '$lib/components/ui/Badge.svelte'
   import Button from '$lib/components/ui/Button.svelte'
   import IconButton from '$lib/components/ui/IconButton.svelte'
@@ -34,7 +35,7 @@
   let deleteTarget = $state<Project | null>(null)
   let detailId = $state<string | null>(null)
 
-  // ── .mikeprj import (drag & drop OR explicit Import button) ──────
+  // ── project file import (drag & drop OR explicit Import button) ──────
   let dragActive = $state(false)
   let importFile = $state<File | null>(null)
   let importEmail = $state('')
@@ -65,7 +66,7 @@
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${exportTarget.name}.mikeprj`
+      a.download = projectFileName(exportTarget.name)
       a.click()
       URL.revokeObjectURL(url)
       toastStore.success(t('ProjectExport.downloadStarted'))
@@ -80,7 +81,7 @@
   function onPickImport(ev: Event) {
     const target = ev.target as HTMLInputElement
     const file = target.files?.[0] ?? null
-    if (file && file.name.toLowerCase().endsWith('.mikeprj')) {
+    if (file && isProjectFileName(file.name)) {
       importFile = file
       importEmail = ''
     } else if (file) {
@@ -103,7 +104,7 @@
     e.preventDefault()
     dragActive = false
     const file = e.dataTransfer?.files?.[0]
-    if (file && file.name.toLowerCase().endsWith('.mikeprj')) {
+    if (file && isProjectFileName(file.name)) {
       importFile = file
       importEmail = ''
     } else if (file) {
@@ -218,7 +219,7 @@
   <input
     bind:this={importInputEl}
     type="file"
-    accept=".mikeprj"
+    accept={PROJECT_FILE_ACCEPT}
     hidden
     onchange={onPickImport}
   />
@@ -304,7 +305,7 @@
   oncancel={() => (deleteTarget = null)}
 />
 
-<!-- .mikeprj import (after drag & drop) -->
+<!-- project file import (after drag & drop) -->
 <Modal
   open={importFile !== null}
   title={t('ProjectImport.title')}
@@ -332,7 +333,7 @@
   {/snippet}
 </Modal>
 
-<!-- per-row .mikeprj export (mirror of the modal in ProjectDetail.svelte) -->
+<!-- per-row project file export (mirror of the modal in ProjectDetail.svelte) -->
 <Modal
   open={exportTarget !== null}
   title={t('ProjectExport.title')}

@@ -1,9 +1,9 @@
 # Workflows, Tabular Reviews, and Assistants — User Manual
 
-This manual explains the three core artefacts MikeRust exposes for
+This manual explains the three core artefacts Cove Studio exposes for
 repeatable AI work — **Workflows**, **Tabular Reviews**, and the
 **Assistant** chat — how they relate, and how to design new ones for
-your own profession. MikeRust ships with 14 built-in workflows aimed at
+your own profession. Cove Studio ships with 14 built-in workflows aimed at
 legal practice, but the underlying model is **domain-agnostic**: the
 same building blocks describe medical-record reviews, M&A IC memos,
 real-estate due diligence, HR resume screening, insurance claims
@@ -172,7 +172,7 @@ chat-driven, set its `type` to `"assistant"`.
 
 ## 5. Domain vs practice — top-level vertical and the sub-category
 
-MikeRust uses **two** orthogonal categorisation fields, introduced
+Cove Studio uses **two** orthogonal categorisation fields, introduced
 in migration 0018:
 
 - **`domain`** — the broad professional vertical the artefact belongs
@@ -285,7 +285,7 @@ Then each column prompt focuses on **one specific extraction** and
 
 **Three universally useful clauses to add to most prompts**:
 
-1. **"Cite the clause/section/page you took this from."** Mike's
+1. **"Cite the clause/section/page you took this from."** The
    citation system surfaces these inline as clickable pills.
 2. **"If the document is silent on this, answer X — do not invent."**
    Forces an honest fail-mode instead of hallucination.
@@ -436,7 +436,7 @@ Produce a Markdown document with these sections in this order:
 
 ## 9. Working with built-in workflows
 
-MikeRust ships 14 built-in workflows, all currently in the
+Cove Studio ships 14 built-in workflows, all currently in the
 legal/transactional domain (`Generate CP Checklist`, `Change of Control
 Review`, `Credit Agreement Summary`, `NDA Review`, `SPA Review`, etc.).
 They live as TypeScript constants in
@@ -469,7 +469,7 @@ In the UI:
 ## 10. Limits, gotchas, and known pitfalls
 
 - **No DB seed for built-ins.** They live in the frontend bundle, not
-  in the database. This means: deleting your `mike.db` doesn't lose
+  in the database. This means: deleting your `cove-studio.db` doesn't lose
   them; but if you customise a built-in you have to duplicate it first
   (the original is immutable in your DB anyway).
 - **Practice list is shipped.** Adding a permanent new practice area

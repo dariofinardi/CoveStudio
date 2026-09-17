@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 /**
  * Citation model. The assistant emits inline markers `[g1]`, `[c2]`,
@@ -50,7 +50,14 @@ export function toCitation(raw: Record<string, unknown>): Citation {
   const ref = String(raw.ref ?? '').trim()
   const pageRaw = raw.page
   const realId = raw.document_id ?? raw.documentId
-  const label = raw.doc_id ?? raw.docId
+  const labelRaw = raw.doc_id ?? raw.docId
+  // A `doc-N` handle is chat-local: the backend resolves it to a UUID
+  // when it can, and a handle that survives here is one it could not
+  // resolve (a label the model invented, a document deleted meanwhile).
+  // Passing it on as an id makes the viewer request `/document/doc-1`,
+  // get a 404 and blame a "removed source" — so it is dropped.
+  const label =
+    typeof labelRaw === 'string' && /^doc-\d+$/i.test(labelRaw.trim()) ? undefined : labelRaw
   const kbPathRaw = raw.path
   const kbPath = typeof kbPathRaw === 'string' && kbPathRaw.trim() ? kbPathRaw : undefined
   return {

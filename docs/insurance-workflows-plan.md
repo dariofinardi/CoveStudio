@@ -1,4 +1,4 @@
-# Piano Workflow Assicurativi — MikeRust
+# Piano Workflow Assicurativi — Cove Studio
 
 ## Obiettivo
 
@@ -132,7 +132,7 @@ dalla polizza allegata.
 
 ## Note implementative
 
-- Il campo `domain` sarà `"insurance"` per tutti (il dominio è già presente nell'enum di MikeRust).
+- Il campo `domain` sarà `"insurance"` per tutti (il dominio è già presente nell'enum di Cove Studio).
 - Il campo `practice` sarà `"Others — Insurance"` in attesa di aggiungere practice specifiche in `practices.ts`.
 - Gli ID seguono la convenzione `builtin-` dei workflow esistenti.
 - Il `prompt_md` di postura è breve perché il lavoro pesante è nei prompt delle singole colonne — coerente con lo stile dei built-in legali tabular (es. `builtin-nda`, `builtin-spa`).

@@ -1,6 +1,6 @@
 //! Corpus plugin manifests — JSON-driven registry for legal corpora.
 //!
-//! Goal: every corpus MikeRust knows about (EUR-Lex, Italian legal,
+//! Goal: every corpus Cove Studio knows about (EUR-Lex, Italian legal,
 //! future Légifrance/BOE/Retsinformation/...) is described by a JSON
 //! manifest file. The runtime scans a directory at startup, parses
 //! each manifest, and exposes a registry the UI and chat system
@@ -23,7 +23,7 @@
 //!
 //! Manifest location: `corpora-plugins/*.json` relative to the
 //! current working directory by default, override with
-//! `MRUST_CORPUS_PLUGINS_DIR`.
+//! `COVE_CORPUS_PLUGINS_DIR`.
 //!
 //! ### Future strategies (schema-only, not implemented yet)
 //!
@@ -112,7 +112,7 @@ pub struct CorpusPlugin {
     #[serde(default = "default_true")]
     pub available: bool,
 
-    /// How MikeRust actually fetches and indexes documents from
+    /// How Cove Studio actually fetches and indexes documents from
     /// this corpus. Discriminated union — see `CorpusStrategy`.
     pub strategy: CorpusStrategy,
 
@@ -144,7 +144,7 @@ pub struct CorpusPlugin {
     /// providers like DILA (Etalab 2.0) and reused by the UI to render
     /// a "Source: …" footer / badge in the corpus panel and on
     /// citation pills. Must be present on any corpus that imports
-    /// data the user redistributes (via `.mikeprj` export, etc.).
+    /// data the user redistributes (via `.coveprj` export, etc.).
     #[serde(default)]
     pub license: Option<CorpusLicense>,
 
@@ -187,7 +187,7 @@ pub struct CorpusDiscovery {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct CorpusLicense {
     /// Short license id, used to look up an info-link locally in
-    /// the UI and to surface in `.mikeprj` exports. Lowercase.
+    /// the UI and to surface in `.coveprj` exports. Lowercase.
     pub id: String,
     /// One-line attribution text the UI shows under the corpus
     /// header. Should follow the producer's recommended template
@@ -593,7 +593,7 @@ fn is_known_builtin(id: &str) -> bool {
 /// Resolve the directory to scan for plugin manifests.
 ///
 /// Resolution order:
-///   1. `MRUST_CORPUS_PLUGINS_DIR` env var, if set. Used verbatim.
+///   1. `COVE_CORPUS_PLUGINS_DIR` env var, if set. Used verbatim.
 ///   2. Walk the ancestors of the current working directory looking
 ///      for a `corpora-plugins/` folder. Picks up the repo-root copy
 ///      when the dev binary runs from `src-tauri/target/...`.
@@ -609,7 +609,7 @@ fn is_known_builtin(id: &str) -> bool {
 /// asset locators in this codebase — keeps `cargo run` / `tauri dev`
 /// / installer scenarios working without an env var.
 pub fn plugins_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("MRUST_CORPUS_PLUGINS_DIR") {
+    if let Some(dir) = crate::product::env_var("CORPUS_PLUGINS_DIR") {
         return PathBuf::from(dir);
     }
 

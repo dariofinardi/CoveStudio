@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 import { api } from './client'
 import { apiBase } from '$lib/stores/api-base.svelte'
@@ -110,7 +110,7 @@ export interface GenerateCallbacks {
 // Backend layers already in place:
 //   * v0.6.1 — Mistral retry-with-backoff (1s/2s/4s, total ~7s) on
 //     POST /chat/completions.
-//   * v0.6.2 — Process-global Semaphore (1 permit) so MikeRust never
+//   * v0.6.2 — Process-global Semaphore (1 permit) so Cove Studio never
 //     issues two Mistral calls concurrently.
 //
 // Those two protect a SINGLE Mistral call against transient 429.

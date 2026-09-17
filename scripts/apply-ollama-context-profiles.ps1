@@ -19,7 +19,7 @@ if (-not $profileData.profiles -or $profileData.profiles.Count -eq 0) {
     throw 'No profiles found in JSON file.'
 }
 
-$tmpRoot = Join-Path $env:TEMP ("mikerust-ollama-profiles-" + [guid]::NewGuid().ToString('N'))
+$tmpRoot = Join-Path $env:TEMP ("covestudio-ollama-profiles-" + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $tmpRoot -Force | Out-Null
 
 try {

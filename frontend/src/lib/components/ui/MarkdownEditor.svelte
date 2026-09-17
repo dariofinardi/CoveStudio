@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Plain-textarea Markdown editor with a formatting toolbar. The toolbar
   buttons insert Markdown syntax at the cursor (heading prefixes, bold/

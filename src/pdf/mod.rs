@@ -33,7 +33,7 @@ const OCR_FALLBACK_THRESHOLD: usize = 10;
 /// populates `libs/pdfium/win-x64/` and `libs/pdfium/win-arm64/`; the
 /// `scripts/build-release.ps1` bundle.resources overlay carries only the
 /// matching arch into the install). Step 5 still covers the
-/// `target/debug/mike-tauri.exe` dev layout where the DLL lives at
+/// `target/debug/cove-studio.exe` dev layout where the DLL lives at
 /// `<workspace>/libs/pdfium/<arch>/` further up the tree.
 #[cfg(feature = "pdf")]
 fn load_pdfium() -> Result<Pdfium> {
@@ -90,7 +90,7 @@ fn load_pdfium() -> Result<Pdfium> {
         .and_then(|p| p.parent().map(|x| x.to_path_buf()));
     let cwd = std::env::current_dir().ok();
     // Tauri MSI install layout: `bundle.resources` files land in
-    // `<install>/resources/` next to `<install>/mike-tauri.exe`.
+    // `<install>/resources/` next to `<install>/cove-studio.exe`.
     let exe_resources = exe_dir.as_ref().map(|d| d.join("resources"));
 
     let bases: Vec<&std::path::Path> = exe_dir

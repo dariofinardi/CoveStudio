@@ -101,12 +101,12 @@ pub struct ModelCatalogue {
 
 /// Resolve the on-disk path for `config/model.json`. Lookup order
 /// mirrors the preset directories:
-///   1. `MRUST_MODEL_CATALOGUE` env var (absolute path).
+///   1. `COVE_MODEL_CATALOGUE` env var (absolute path).
 ///   2. Walk ancestors from CWD looking for `config/model.json`.
 ///   3. Walk ancestors from the current executable's path.
 ///   4. Fallback to `./config/model.json`.
 pub fn catalogue_path() -> PathBuf {
-    if let Ok(p) = std::env::var("MRUST_MODEL_CATALOGUE") {
+    if let Some(p) = crate::product::env_var("MODEL_CATALOGUE") {
         return PathBuf::from(p);
     }
     if let Ok(cwd) = std::env::current_dir() {

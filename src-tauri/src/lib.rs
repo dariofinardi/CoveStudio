@@ -27,16 +27,14 @@ impl ApiBaseUrl {
     }
 }
 
-/// Resolve `<home>/mikerust-data/` and ensure it exists. Used for
-/// both the SQLite DB (`mike.db`, owned by the `mike` crate) and the
-/// release-build log file (`mike-tauri.log`, set up below). Returning
+/// Resolve `<home>/cove-studio-data/` and ensure it exists. Used for
+/// both the SQLite DB (`cove-studio.db`, owned by the `cove_studio` crate) and the
+/// release-build log file (`cove-studio.log`, set up below). Returning
 /// `None` is non-fatal — callers fall back to "no extra logging" so a
 /// missing HOME env doesn't bring the shell down.
 fn ensure_data_dir() -> Option<std::path::PathBuf> {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .ok()?;
-    let dir = std::path::PathBuf::from(home).join("mikerust-data");
+    cove_studio::product::home_dir()?;
+    let dir = cove_studio::product::data_dir();
     std::fs::create_dir_all(&dir).ok()?;
     Some(dir)
 }
@@ -58,7 +56,7 @@ fn ensure_data_dir() -> Option<std::path::PathBuf> {
 ///
 /// There is still a benign TOCTOU window between this pre-bind check
 /// and the real `tokio::net::TcpListener::bind` inside
-/// `mike::run_server_with_channels`. In the rare collision case the
+/// `cove_studio::run_server_with_channels`. In the rare collision case the
 /// real bind returns AddrInUse, the spawn logs the error, and the
 /// frontend's invoke handler returns an empty URL — the user can
 /// relaunch the app and a fresh random pick will almost certainly
@@ -89,7 +87,7 @@ pub fn run() {
     //     `cargo run`); detached in MSI installs because main.rs sets
     //     `windows_subsystem = "windows"`.
     //   - file (`tracing-appender::rolling::never`) — writes to
-    //     `<home>/mikerust-data/mike-tauri.log`, always on. This is
+    //     `<home>/cove-studio-data/cove-studio.log`, always on. This is
     //     the only sink that survives the windowed release build, so
     //     "the backend died silently" can finally be triaged by
     //     opening the log file. We keep the worker guard alive for
@@ -100,7 +98,7 @@ pub fn run() {
     let log_dir = ensure_data_dir();
     let file_appender = log_dir
         .as_ref()
-        .map(|d| tracing_appender::rolling::never(d, "mike-tauri.log"));
+        .map(|d| tracing_appender::rolling::never(d, cove_studio::product::SHELL_LOG_FILE_NAME));
     let (file_writer, file_guard) = match file_appender {
         Some(a) => {
             let (w, g) = tracing_appender::non_blocking(a);
@@ -123,7 +121,7 @@ pub fn run() {
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG")
                 .unwrap_or_else(|_| {
-                    "mike=debug,mike_tauri_lib=debug,tower_http=info".into()
+                    "cove_studio=debug,cove_studio_desktop_lib=debug,tower_http=info".into()
                 }),
         ))
         .with(tracing_subscriber::fmt::layer())
@@ -133,7 +131,7 @@ pub fn run() {
     if let Some(d) = log_dir.as_ref() {
         tracing::info!(
             "[tauri] tracing → {}",
-            d.join("mike-tauri.log").display()
+            d.join(cove_studio::product::SHELL_LOG_FILE_NAME).display()
         );
     } else {
         tracing::warn!(
@@ -143,7 +141,7 @@ pub fn run() {
 
 
     // Biometric channel: axum sends requests, Tauri processes them with HWND
-    let (bio_tx, mut bio_rx) = mpsc::channel::<mike::BiometricRequest>(4);
+    let (bio_tx, mut bio_rx) = mpsc::channel::<cove_studio::BiometricRequest>(4);
 
     // Port discovery channel: axum reports the OS-assigned port back so
     // the Tauri shell can hand it to the frontend on demand. Default
@@ -167,7 +165,7 @@ pub fn run() {
         let rt = match tokio::runtime::Runtime::new() {
             Ok(rt) => rt,
             Err(e) => {
-                eprintln!("[mikerust:fatal] failed to build tokio runtime: {e}");
+                eprintln!("[cove-studio:fatal] failed to build tokio runtime: {e}");
                 tracing::error!("[tauri] failed to build tokio runtime: {e}");
                 return;
             }
@@ -178,7 +176,7 @@ pub fn run() {
                 .and_then(|s| s.parse().ok())
                 .unwrap_or_else(pick_free_random_port);
             tracing::info!("[tauri] embedded axum will bind on 127.0.0.1:{port}");
-            if let Err(e) = mike::run_server_with_channels(
+            if let Err(e) = cove_studio::run_server_with_channels(
                 port,
                 Some(bio_tx),
                 Some(port_tx),
@@ -193,7 +191,7 @@ pub fn run() {
                 }
                 let joined = chain.join(" -> ");
                 tracing::error!("[tauri] axum server failed: {joined}");
-                eprintln!("[mikerust:fatal] axum server failed: {joined}");
+                eprintln!("[cove-studio:fatal] axum server failed: {joined}");
             }
         });
     });
@@ -364,7 +362,7 @@ fn open_external_url(url: String) -> Result<(), String> {
 /// model generated.
 ///
 /// Security model: the path is validated against the user's storage
-/// root (`<home>/mikerust-data/storage/`, the same base
+/// root (`<home>/cove-studio-data/storage/`, the same base
 /// `LocalStorage` uses) plus the OS temp dir as a permitted prefix.
 /// Anything pointing elsewhere — a network share, `C:\Windows`, a
 /// crafted path with `..` segments that escape the base — is
@@ -382,10 +380,8 @@ fn open_external_path(path: String) -> Result<(), String> {
 
     // Build the allowlist of acceptable prefixes. Canonicalize each
     // so the prefix comparison below is symmetric with the input.
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .map_err(|_| "USERPROFILE/HOME not set".to_string())?;
-    let storage_default = PathBuf::from(home).join("mikerust-data").join("storage");
+    cove_studio::product::home_dir().ok_or_else(|| "USERPROFILE/HOME not set".to_string())?;
+    let storage_default = cove_studio::product::data_subdir("storage");
     let storage_override = std::env::var("STORAGE_PATH").ok().map(PathBuf::from);
 
     let mut allowed: Vec<PathBuf> = vec![storage_default];

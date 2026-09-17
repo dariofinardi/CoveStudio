@@ -1,43 +1,25 @@
-# MikeRust frontend
+# Cove Studio frontend
 
-Clean-room Svelte 5 rewrite of the MikeRust desktop UI.
+Svelte 5 desktop interface of Cove Studio (formerly MikeRust), served
+inside the Tauri shell.
 
-- **Inception:** 2026-05-15
-- **Stack:** Tauri 2 · Svelte 5 (runes) · TypeScript · Tailwind CSS v4 · Vite 6
-- **License:** AGPL-3.0-only (see [LICENSE](LICENSE))
-- **Plan:** [../docs/mikerust-ui-rewrite-plan.md](../docs/mikerust-ui-rewrite-plan.md) v2.1
-
-## Status
-
-Fase 0 scaffold. The app currently boots, discovers the axum backend port
-via the Tauri `api_base_url` command, and renders `/healthz` as a smoke
-test.
-
-## Anti-contamination
-
-This frontend is a **clean-room rewrite**. It does NOT derive from the
-upstream "Mike" AGPL project. The legacy frontend (kept at
-`../frontendMike/` as a working reference during migration) MUST NOT be
-read while developing this one — only screenshots of the rendered UI
-and MikeRust commit messages are admissible sources. See plan §21 for
-the full anti-contamination rules.
+- **Stack:** Tauri 2 · Svelte 5 (runes) · TypeScript · Tailwind CSS v4 · Vite
+- **Licence:** AGPL-3.0-only (see [LICENSE](LICENSE) and [../NOTICE.md](../NOTICE.md))
+- **History:** written from 15 May 2026 following
+  [../docs/mikerust-ui-rewrite-plan.md](../docs/mikerust-ui-rewrite-plan.md);
+  it replaced the Next.js frontend forked from Mike on 17 May 2026.
 
 ## Develop
 
-From the **repo root** (`c:\Progetti\MikeRust`):
+From the repository root:
 
 ```pwsh
 # 1. Install dependencies (once)
 pnpm --dir frontend install
 
-# 2. Launch the Tauri shell against the NEW Svelte frontend
-cargo tauri dev --config src-tauri/tauri.svelte.conf.json
+# 2. Launch the desktop app with the Svelte frontend
+.\frontend\node_modules\.bin\tauri.cmd dev --config src-tauri/tauri.svelte.conf.json
 ```
-
-The default `cargo tauri dev` (without `--config`) still launches the
-legacy Next.js frontend from `../frontendMike/`. The two configurations
-are intentionally parallel during migration; the legacy one and its
-config will be deleted in Fase 8 once parity is reached.
 
 ## Scripts (`pnpm <script>` inside this directory)
 
@@ -46,7 +28,7 @@ config will be deleted in Fase 8 once parity is reached.
 | `dev`            | Vite dev server on `127.0.0.1:5173`     |
 | `build`          | Type-check + production build to `dist` |
 | `preview`        | Serve `dist` for local preview          |
-| `typecheck`      | `svelte-check` (CI)                     |
+| `typecheck`      | `svelte-check`                          |
 | `lint`           | ESLint on `src/`                        |
 | `format`         | Prettier write                          |
 | `test`           | Vitest unit suite                       |
@@ -56,30 +38,48 @@ config will be deleted in Fase 8 once parity is reached.
 
 ## Layout
 
-See plan §3 for the full directory tree. High-level:
-
 ```
 frontend/
 ├── src/
 │   ├── lib/
-│   │   ├── api/        ← HTTP wrappers for /auth /chat /document …
-│   │   ├── components/ ← UI primitives + feature components
+│   │   ├── api/        ← HTTP wrappers for the backend routes
+│   │   ├── components/ ← UI primitives and feature components
 │   │   ├── stores/     ← Svelte 5 runes state (one file per resource)
-│   │   ├── tauri/      ← invoke wrappers (api_base_url, open_external_url)
-│   │   ├── types/      ← TS mirrors of Rust serde structs
-│   │   └── utils/      ← format, markdown, sse, download, …
-│   ├── routes/         ← Boot / Setup / Unlock / Assistant / …
+│   │   ├── tauri/      ← invoke wrappers for the Tauri commands
+│   │   ├── types/      ← TypeScript mirrors of the Rust serde structs
+│   │   ├── utils/      ← citations, highlight, markdown, sse, download, …
+│   │   └── product.ts  ← product name, project file format, preference keys
+│   ├── routes/         ← Boot / Setup / Unlock / Assistant / Projects / …
 │   ├── App.svelte
 │   ├── app.css
 │   └── main.ts
-├── locales/            ← i18n bundle (en canonical + it/fr/de/es/pt)
+├── locales/            ← i18n catalogues (en canonical + it/fr/de/es/pt)
 ├── public/             ← static assets bundled as-is
 └── tests/              ← unit (Vitest) + e2e (Playwright)
 ```
 
+## Conventions
+
+- Every user-facing string goes through `i18n.t('Namespace.key')`, with the
+  key present in all six catalogues; `scripts/fill-i18n.mjs` checks parity.
+  Translations can use `{product}` and `{projectExt}`, filled from
+  `src/lib/product.ts`.
+- User preferences are saved through the `/user/*` endpoints; `localStorage`
+  is used only for device-local display preferences.
+- Schema identifiers (enum values, JSON keys, route parameters) stay in
+  English; only display labels are localised.
+- `xlsx` (SheetJS) is vendored: `vendor/xlsx-0.20.3.tgz`, the official
+  tarball from `https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz`. The
+  npm registry copy stopped at 0.18.5, which carries the prototype
+  pollution (GHSA-4r6h-8v6p-xvw6, fixed in 0.19.3) and ReDoS
+  (GHSA-5pgg-2g8v-p4x9, fixed in 0.20.2) advisories with no npm release to
+  upgrade to. To move to a newer SheetJS, download the new tarball into
+  `vendor/`, point the dependency at it and delete the old one.
+
 ## Backend contract
 
-The frontend is a pure HTTP client of the axum backend documented in
-plan §6. There are only **two Tauri commands**: `api_base_url` (boot)
-and `open_external_url` (system browser routing). Everything else is
-fetched from `http://127.0.0.1:<discovered-port>`.
+The frontend is an HTTP client of the axum backend at
+`http://127.0.0.1:<port>`, discovered at startup through the
+`api_base_url` Tauri command. The other Tauri commands only cover what a
+web page cannot do: `open_external_url`, `open_external_path` and
+`pick_folder`.

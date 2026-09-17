@@ -1,6 +1,6 @@
 # Authoritative legal corpora
 
-Plan and per-source survey for ingesting public legal sources (EU + national) into MikeRust's RAG store, configurable per-corpus from **Impostazioni → Documenti locali / EUR-Lex / …**.
+Plan and per-source survey for ingesting public legal sources (EU + national) into Cove Studio's RAG store, configurable per-corpus from **Impostazioni → Documenti locali / EUR-Lex / …**.
 
 ## Goals
 

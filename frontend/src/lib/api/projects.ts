@@ -1,4 +1,4 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 import { api } from './client'
 import type { Domain } from '$lib/types/domain'
@@ -84,7 +84,7 @@ export const projectsApi = {
       { method: 'PATCH', body: { folder_id } },
     ),
 
-  /** Export to an encrypted .mikeprj blob. */
+  /** Export to an encrypted project file blob. */
   exportProject: (id: string, recipient_email: string, include_chats = false) =>
     api<Blob>(`/project/${encodeURIComponent(id)}/export`, {
       method: 'POST',
@@ -92,7 +92,7 @@ export const projectsApi = {
       asBlob: true,
     }),
 
-  /** Import a .mikeprj blob (UI wiring is a later phase). */
+  /** Import a project file blob. */
   importProject: (file: File, recipient_email: string) => {
     const fd = new FormData()
     fd.append('file', file)

@@ -5,47 +5,39 @@
  Everyone is permitted to copy and distribute verbatim copies of this
  license document, but changing it is not allowed.
 
-This MikeRust frontend (the source code under `frontend/`) is licensed
-under the GNU Affero General Public License, version 3.0 only
-(AGPL-3.0-only).
-
-The full text of the license is published by the Free Software
-Foundation at: https://www.gnu.org/licenses/agpl-3.0.txt
-
-A copy of the full license text MUST be distributed alongside this
-software. If your distribution does not include the full text yet,
-download it from the URL above and place it in this file before
-redistribution.
+The Cove Studio frontend (the source code under `frontend/`) is licensed
+under the GNU Affero General Public License, version 3 only
+(AGPL-3.0-only). The full licence text is in `../LICENSE` and at
+https://www.gnu.org/licenses/agpl-3.0.txt.
 
 ------------------------------------------------------------------------
 
-  Copyright (c) 2026 MikeRust contributors. All rights reserved.
+  Copyright (c) 2026 Dario Finardi.
 
   This program is free software: you can redistribute it and/or modify
   it under the terms of the GNU Affero General Public License as
-  published by the Free Software Foundation, version 3.0 only of the
-  License.
+  published by the Free Software Foundation, version 3 of the License
+  only.
 
   This program is distributed in the hope that it will be useful, but
   WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU
   Affero General Public License for more details.
 
   You should have received a copy of the GNU Affero General Public
-  License along with this program.  If not, see
+  License along with this program. If not, see
   <https://www.gnu.org/licenses/agpl-3.0.txt>.
 
 ------------------------------------------------------------------------
 
-This frontend is a CLEAN-ROOM REWRITE that does NOT derive from the
-upstream AGPL project "Mike". It was authored independently starting
-2026-05-15 in Svelte 5, in a new directory tree (`frontend/`), without
-copying code from `frontendMike/` or from any Mike repository.
+Provenance
 
-See `../docs/mikerust-ui-rewrite-plan.md` for the architectural plan
-and anti-contamination rules followed during development.
+The frontend source code was written from 2026-05-15 in Svelte 5, in a
+new directory tree, following the rewrite plan in
+`../docs/mikerust-ui-rewrite-plan.md`. It replaced the Next.js frontend
+forked from the AGPL-3.0 project "Mike" (github.com/willchen96/mike),
+which was removed from the repository on 2026-05-17.
 
-Re-licensing notice: as the sole copyright holder, the project owner
-may re-license future releases under any terms (Apache 2.0, MIT, BSL,
-proprietary, dual). Previously distributed releases remain under
-AGPL-3.0 for whoever received them.
+Some English interface strings in `locales/` were originally written for
+Mike's interface; they remain copyright of Will Chen and the Mike
+contributors under AGPL-3.0. See `../NOTICE.md`.

@@ -1,5 +1,10 @@
 # GLiNER2 PII — integration plan
 
+> **Note (September 2026).** This plan dates from May 2026. The
+> `SemplificaAI/gliner2-rs` crate and the `SemplificaAI` model it
+> references are being replaced by a fork of the crate and a new ONNX
+> conversion of the base model published under the maintainer's account.
+
 **Status**: design + scaffolding lands on `main`; route + UI follow once
 the foundation is callable.
 
@@ -36,7 +41,7 @@ the foundation is callable.
 - Repo: <https://github.com/SemplificaAI/gliner2-rs>
 - Crate: `gliner2_inference` v0.5.0
 - License: Apache-2.0
-- ort: pinned to `=2.0.0-rc.9` — exact match with MikeRust's existing
+- ort: pinned to `=2.0.0-rc.9` — exact match with Cove Studio's existing
   pin, no resolver drama, cargo dedupes
 - Tokenizer: `tokenizers 0.19.1` — already transitive via fastembed
 - Default cache: `~/.cache/huggingface/hub/` via `hf-hub`
@@ -70,11 +75,11 @@ Default model: `SemplificaAI/gliner2-privacy-filter-PII-multi`,
 variant `fp16_v2`. Resolved at runtime via `Gliner2Engine::from_
 pretrained(...)`; `hf-hub` handles the download + cache.
 
-We redirect the HF cache to `~/mikerust-data/gliner2/` at startup
+We redirect the HF cache to `~/cove-studio-data/gliner2/` at startup
 by setting `HF_HOME` (same pattern as `FASTEMBED_CACHE_DIR`):
 
 - One folder per heavy on-disk artefact, all under
-  `~/mikerust-data/`
+  `~/cove-studio-data/`
 - Tauri watcher never sees the model files
 - Power users can override with their own `HF_HOME` env var
 

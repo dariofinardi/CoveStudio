@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Spreadsheet renderer. Parses XLSX/XLS/ODS/CSV via SheetJS (pure JS)
   and renders each sheet as a selectable HTML table; the cited passage

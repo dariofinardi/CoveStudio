@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Plain-text renderer for Markdown, TXT, CSV and RTF. Markdown is
   rendered formatted; the others as monospaced text. RTF is decoded

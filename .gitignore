@@ -53,10 +53,11 @@ coverage/
 
 # ─── AI model + downloaded data ─────────────────────────────────────
 # multilingual-e5-base ONNX weights (~1.1 GB) and tokenizer/configs.
-# `ensure_fastembed_cache_dir()` pins these to %USERPROFILE%/mikerust-data
+# `ensure_fastembed_cache_dir()` pins these to %USERPROFILE%/cove-studio-data
 # but legacy / dev runs may leave them in either of these project paths.
 .fastembed_cache/
 mikerust-data/
+cove-studio-data/
 # Generic catch-all for AI/ML caches that tools may drop in-repo.
 .cache/
 .huggingface/
@@ -81,7 +82,7 @@ sentencepiece.bpe.model
 # CRITICAL — DO NOT REMOVE: the runtime SQLite DB stores user API keys
 # (Anthropic, Gemini, OpenAI) in plaintext. The patterns below are the
 # primary safeguard against an accidental `git add .` ever pushing the
-# DB to GitHub. The default DB location is `<user-home>/mikerust-data/`
+# DB to GitHub. The default DB location is `<user-home>/cove-studio-data/`
 # (outside the project tree) on purpose, but a clone with a custom
 # DATABASE_URL could still land it inside the tree — `*.db` catches
 # that.
@@ -162,9 +163,9 @@ PLAN_CODEX.md
 config/docx-templates/user/
 
 # Upstream Mike reference material (third-party docs from
-# willchen96/mike + Semplifica adaptation notes) — kept on disk for
+# willchen96/mike and early adaptation notes) — kept on disk for
 # author convenience but NOT shipped in this repo: those docs talk
-# about a different stack and a different toolchain than MikeRust.
+# about a different stack and a different toolchain than Cove Studio.
 docs/mike-upstream/
 
 # SuzieLaw reference checkout — a local clone of the SuzieLaw project

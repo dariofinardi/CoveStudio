@@ -17,7 +17,7 @@
 
 #![cfg(feature = "rag")]
 
-use mike::embeddings::{register_sqlite_vec_auto_extension, EmbeddingService, SearchScope};
+use cove_studio::embeddings::{register_sqlite_vec_auto_extension, EmbeddingService, SearchScope};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
 

@@ -419,7 +419,7 @@ async fn fetch_row(
 
     // Pull the full text from HuggingFace.
     let client = reqwest::Client::builder()
-        .user_agent("MikeRust/0.1 (italian-legal fetch)")
+        .user_agent(crate::product::user_agent(Some("italian-legal fetch")))
         .timeout(std::time::Duration::from_secs(60))
         .build()
         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
@@ -700,7 +700,7 @@ async fn resync_document(
             })?
             .0;
         let client = reqwest::Client::builder()
-            .user_agent("MikeRust/0.1 (italian-legal resync)")
+            .user_agent(crate::product::user_agent(Some("italian-legal resync")))
             .timeout(std::time::Duration::from_secs(60))
             .build()
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;

@@ -4,7 +4,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "mike=debug,tower_http=info".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "cove_studio=debug,tower_http=info".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -14,6 +14,6 @@ async fn main() -> anyhow::Result<()> {
         .parse()
         .unwrap_or(3001);
 
-    mike::run_server(port).await
+    cove_studio::run_server(port).await
 }
 

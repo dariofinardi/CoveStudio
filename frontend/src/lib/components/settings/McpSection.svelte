@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Settings → MCP servers. List of per-user MCP server configs with a
   simplified add/edit form (name + URL + API key, per plan Q9 — the

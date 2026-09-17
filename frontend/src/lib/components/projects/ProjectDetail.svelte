@@ -1,10 +1,11 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Project detail: header (name, domain, retrieval-scope toggle, export)
   plus three tabs — Documents, Conversations and Tabular reviews. The
   backend has no folder/version model, so documents are a flat list.
 -->
 <script lang="ts">
+  import { projectFileName } from '$lib/product'
   import Badge from '$lib/components/ui/Badge.svelte'
   import Button from '$lib/components/ui/Button.svelte'
   import Input from '$lib/components/ui/Input.svelte'
@@ -226,7 +227,7 @@
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `${project.name}.mikeprj`
+      a.download = projectFileName(project.name)
       a.click()
       URL.revokeObjectURL(url)
       toastStore.success(t('ProjectExport.downloadStarted'))

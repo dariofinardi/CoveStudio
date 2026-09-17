@@ -1,6 +1,6 @@
-//! Crypto envelope for `.mikeprj` files.
+//! Crypto envelope for exported project files.
 //!
-//! See `mikeprj/mod.rs` for the format spec. This module owns:
+//! See `project_archive/mod.rs` for the format spec. This module owns:
 //!  - email normalization + SHA-256 fingerprint
 //!  - Argon2id key derivation from the email
 //!  - AES-256-GCM encrypt/decrypt of the ZIP payload
@@ -12,7 +12,17 @@ use anyhow::{anyhow, bail, Result};
 use argon2::Argon2;
 use sha2::{Digest, Sha256};
 
-pub const MAGIC: &[u8; 8] = b"MIKEPRJ\0";
+/// Magic written at the start of every new project file.
+pub const MAGIC: &[u8; 8] = b"COVEPRJ\0";
+
+/// Magics written by earlier releases. Still accepted when reading, so
+/// files exported before the change import unchanged: the rest of the
+/// header and the encryption are identical.
+pub const LEGACY_MAGICS: &[&[u8; 8]] = &[b"MIKEPRJ\0"];
+
+fn is_known_magic(bytes: &[u8]) -> bool {
+    bytes == MAGIC || LEGACY_MAGICS.iter().any(|m| bytes == *m)
+}
 pub const VERSION: u8 = 1;
 pub const FLAG_ENCRYPTED: u8 = 0b0000_0001;
 
@@ -69,14 +79,14 @@ impl Header {
 
     pub fn read(bytes: &[u8]) -> Result<Self> {
         if bytes.len() < HEADER_SIZE {
-            bail!("not a .mikeprj file: too short");
+            bail!("not a project file: too short");
         }
-        if &bytes[0..8] != MAGIC {
-            bail!("not a .mikeprj file: bad magic");
+        if !is_known_magic(&bytes[0..8]) {
+            bail!("not a project file: bad magic");
         }
         let version = bytes[8];
         if version != VERSION {
-            bail!("unsupported .mikeprj version {version}");
+            bail!("unsupported project file version {version}");
         }
         let flags = bytes[9];
         let mut email_hash = [0u8; 32];
@@ -119,7 +129,7 @@ pub fn seal(recipient_email: &str, payload: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Open an exported `.mikeprj` file using the recipient's email. Returns
+/// Open an exported project file using the recipient's email. Returns
 /// the decrypted ZIP payload. Errors include:
 ///  - bad magic / unsupported version
 ///  - email fingerprint mismatch (file is for a different recipient)
@@ -131,7 +141,7 @@ pub fn open(recipient_email: &str, file_bytes: &[u8]) -> Result<Vec<u8>> {
 
     if header.email_hash != email_hash(recipient_email) {
         bail!(
-            "this .mikeprj file was sealed for a different email — \
+            "this project file was sealed for a different email — \
              ask the sender to re-export it for {}",
             normalize_email(recipient_email),
         );
@@ -159,7 +169,7 @@ mod tests {
 
     #[test]
     fn roundtrip_seal_open() {
-        let payload = b"hello mikeprj";
+        let payload = b"hello project";
         let sealed = seal("Alice@example.com", payload).unwrap();
         let opened = open("alice@example.com", &sealed).unwrap();
         assert_eq!(opened, payload);
@@ -206,6 +216,22 @@ mod tests {
         assert_eq!(parsed.email_hash, [7u8; 32]);
         assert_eq!(parsed.salt, [42u8; 16]);
         assert_eq!(parsed.nonce, [9u8; 12]);
+    }
+
+    #[test]
+    fn new_files_use_the_current_magic() {
+        let sealed = seal("alice@example.com", b"x").unwrap();
+        assert_eq!(&sealed[..8], MAGIC);
+    }
+
+    #[test]
+    fn files_with_a_legacy_magic_still_open() {
+        let mut sealed = seal("alice@example.com", b"legacy payload").unwrap();
+        for legacy in LEGACY_MAGICS {
+            sealed[..8].copy_from_slice(*legacy);
+            let opened = open("alice@example.com", &sealed).unwrap();
+            assert_eq!(opened, b"legacy payload");
+        }
     }
 
     #[test]

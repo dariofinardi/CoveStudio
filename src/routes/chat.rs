@@ -22,7 +22,12 @@ use crate::{
     storage::make_storage,
     AppState,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+
+mod attachment_budget;
+mod citation_resolution;
+mod prompts;
+mod tool_echo;
 
 /// Build the OpenAI-compatible `LocalConfig` for a model id carrying a
 /// `local:`, `openai:` or `mistral:` prefix. Returns `None` for native
@@ -190,7 +195,7 @@ async fn discover_one_mcp(server: McpServerOut) -> Option<McpDiscovered> {
             "params": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": { "name": "MikeRust", "version": "0.1" }
+                "clientInfo": { "name": crate::product::NAME, "version": env!("CARGO_PKG_VERSION") }
             }
         }))
         .send()
@@ -664,61 +669,6 @@ async fn discover_mcp_for_user(state: &AppState, user_id: &str) -> Vec<McpDiscov
     discovered
 }
 
-fn build_mcp_system_prompt(servers: &[McpDiscovered]) -> String {
-    if servers.is_empty() {
-        return String::new();
-    }
-    // Minimal MCP awareness: the actual tool definitions are passed to the
-    // model via the standard `tools` parameter — we don't need to repeat
-    // them in the system prompt. A long verbose listing biases the model
-    // into proposing tools for every greeting. Keep the prompt small and
-    // assertive about NOT calling tools unless explicitly asked.
-    let mut s = String::from(
-        "You are a helpful general-purpose chat assistant. Your default behavior \
-         is to answer questions directly from the conversation context (including \
-         any attached documents). \n\n\
-         You have access to optional external tools provided by connected MCP \
-         servers (declared via the `tools` parameter). Invoke a tool **only when \
-         the user explicitly requests it** (e.g. \"use tool X\", \"call X\", \
-         \"run X on this\"). For greetings, generic questions (\"test\", \"hi\", \
-         \"explain\", \"summarize\", \"analyze this\"), reply normally — \
-         **do not list available tools or propose them proactively**.\n\n\
-         Connected MCP servers (don't enumerate them unless asked):\n",
-    );
-    for srv in servers {
-        let display = srv
-            .server_name
-            .clone()
-            .unwrap_or_else(|| srv.config_name.clone());
-        let version = srv
-            .server_version
-            .as_ref()
-            .map(|v| format!(" v{v}"))
-            .unwrap_or_default();
-        // One-line summary: name, version, first sentence of instructions only.
-        let summary = srv
-            .instructions
-            .as_deref()
-            .map(|inst| {
-                inst.split(|c: char| c == '.' || c == '\n')
-                    .next()
-                    .unwrap_or("")
-                    .trim()
-                    .chars()
-                    .take(160)
-                    .collect::<String>()
-            })
-            .unwrap_or_default();
-        if summary.is_empty() {
-            s.push_str(&format!("- `{display}`{version}\n"));
-        } else {
-            s.push_str(&format!("- `{display}`{version} — {summary}\n"));
-        }
-    }
-    s.push('\n');
-    s
-}
-
 /// Reduce a corpus identifier (or any model-emitted `doc_id` variant)
 /// to its alphanumeric-only, lowercase canonical form. Used by the
 /// citation resolver as a last-resort lookup key against the user's
@@ -899,6 +849,9 @@ pub struct DocPayload {
     pub text: Option<String>,
     /// `data:image/png;base64,...` URLs for vision-capable models.
     pub images: Vec<String>,
+    /// Set when `text` holds only excerpts because the whole document did
+    /// not fit the model's context window.
+    pub excerpt: Option<attachment_budget::ExcerptInfo>,
 }
 
 const MAX_PDF_IMAGE_PAGES: usize = 8;
@@ -1007,6 +960,7 @@ async fn load_attached_docs(
                 filename: filename.clone(),
                 text: Some(stub),
                 images: Vec::new(),
+                excerpt: None,
             });
             continue;
         }
@@ -1074,6 +1028,7 @@ async fn load_attached_docs(
                     filename: filename.clone(),
                     text: Some(final_text),
                     images: Vec::new(),
+                    excerpt: None,
                 });
                 continue;
             }
@@ -1088,6 +1043,7 @@ async fn load_attached_docs(
             filename: filename.clone(),
             text: None,
             images: Vec::new(),
+            excerpt: None,
         };
 
         match file_type.as_str() {
@@ -1161,7 +1117,7 @@ async fn load_attached_docs(
             "pdf" => {
                 #[cfg(feature = "pdf")]
                 {
-                    let tmp = std::env::temp_dir().join(format!("mike-{}.pdf", doc_id));
+                    let tmp = std::env::temp_dir().join(crate::product::temp_file_name(&format!("{doc_id}.pdf")));
                     if std::fs::write(&tmp, &bytes).is_ok() {
                         let pages = crate::pdf::extract_text(&tmp).ok();
                         if let Some(pages) = pages {
@@ -1434,166 +1390,6 @@ async fn maybe_redact_pii(
         );
     }
     text
-}
-
-/// Mike's original legal-assistant system prompt, adapted from upstream
-/// (willchen96/mike, `backend/src/lib/chatTools.ts` SYSTEM_PROMPT).
-const MRUST_SYSTEM_PROMPT: &str = r#"You are Mike, an AI legal assistant that helps lawyers and legal professionals analyze documents, answer legal questions, and draft legal documents.
-
-RESPONSE STYLE:
-- Always respond in the same language as the user's last message.
-- Keep answers concise and well-structured (short paragraphs and/or bullets).
-- Do not repeat the same filename multiple times in a row.
-- When referring to provided documents, list each filename at most once.
-- Avoid verbose meta-reasoning or restating the whole workflow unless explicitly requested.
-
-DOCUMENT CITATION INSTRUCTIONS:
-When you reference specific content from an attached or project document, place a marker [c1], [c2], [c3], etc. inline in your prose at the point of reference. The marker ALWAYS begins with the lowercase letter "c" (for "chat document") followed by a sequential number. NEVER write a bare bracketed number like [1] — without the "c" prefix it is read as ordinary text (a clause or page number), not a citation, and no source pill is rendered.
-
-After your complete response, append a <CITATIONS> block containing a JSON array with one entry per marker:
-
-<CITATIONS>
-[
-  {"ref": "c1", "doc_id": "doc-1", "page": 3, "quote": "exact verbatim text from the document"},
-  {"ref": "c2", "doc_id": "doc-2", "page": "41-42", "quote": "Section 4.2 describes the procedure [[PAGE_BREAK]] in all material respects."}
-]
-</CITATIONS>
-
-CRITICAL: "ref" MUST be the exact marker text you wrote in prose, without the brackets — the marker [c1] pairs with {"ref": "c1", ...}, [c2] with {"ref": "c2", ...}, and so on. "ref" is a string, NOT a page number, footnote number, section number, or any other number printed inside the document. Assign refs as "c1", "c2", "c3", ... in the order citations first appear in your prose. Never use a page number or a document's own numbering as the marker. Every [cN] you write in prose MUST have a matching {"ref": "cN", ...} entry in the JSON block, and every entry MUST have a [cN] marker somewhere in the prose.
-
-Rules:
-- Only cite text that appears verbatim in the provided documents
-- In every <CITATIONS> entry, "doc_id" MUST be the exact chat-local document label you were given (for example "doc-1"). Never use a filename, document UUID, or any other identifier in "doc_id". "doc_id" is separate from "ref": "ref" is the prose marker ("c1", "c2", ...) and "doc_id" is the document handle ("doc-1", "doc-2", ...) — they are not interchangeable
-- Keep quotes short (15–200 characters, ideally <= 25 words) and narrowly scoped to the specific claim. Don't reuse one quote to support multiple different claims — give each its own citation
-- "page" refers to the sequential [Page N] marker in the text you were given (1-indexed from the first page). IGNORE any page numbers printed inside the document itself (footers, roman numerals, etc.)
-- For a single-page quote, set "page" to an integer. If a quote is one continuous sentence that spans two pages, set "page" to "N-M" and insert [[PAGE_BREAK]] in the quote at the page break. Otherwise, use separate citations for text on different pages
-- Put the <CITATIONS> block at the very end of the response. Omit it entirely if there are no citations
-- DO NOT write free-form references like "[doc-id: <uuid>, page N]", "[doc-id: doc-0, page 1]", "(see doc-0, p. 3)", or any other ad-hoc bracketed format in your prose. The ONLY recognised inline marker is "[cN]" (paired with a "ref": "cN" entry in the <CITATIONS> block). Free-form references render as plain text — the user cannot click them
-
-CITATION QUALITY RULES (every violation produces a useless pill — the user clicks it and lands in the wrong place):
-1. EVERY citation MUST have a non-empty "quote" of at least 15 characters, copied verbatim from the document. If you don't have a specific passage to anchor the claim to, OMIT the citation. A claim with no citation is better than a citation that opens to nothing.
-2. NEVER use a "page" range like "1-3" or "1-7" to mean "the whole document" or "somewhere in this document". Page ranges are RESERVED for the narrow case of a single continuous sentence that physically spans a page break — and you MUST include `[[PAGE_BREAK]]` inside the quote at the break point. If a citation does not contain `[[PAGE_BREAK]]`, the page MUST be a single integer.
-3. Prefer per-passage citations over per-document citations. A 6-page document supporting 5 distinct claims should produce 5 citations with 5 distinct quotes on 5 (possibly different) pages — NOT 1 citation with page "1-6" covering everything. One-citation-per-attached-document is a degenerate pattern; the user can already see the file is attached.
-4. When attached documents (doc-1, doc-2, ...) are available AND cover the claim, cite THEM. Only cite KB documents ([gN] for global library, [pN] for project) when no attached doc covers the claim. Mixing a KB citation into a paragraph that is otherwise grounded in attached documents confuses the user — they expect attached refs to dominate when they attached files explicitly for this turn.
-5. If your prose mentions [cN] you previously used in this conversation, RE-EMIT its <CITATIONS> entry in the current turn's JSON block. Continuing to reference [c5] from turn 1 without re-emitting it in turn 2's CITATIONS leaves the user clicking a dead pill — every [cN] in the current message's prose needs a matching entry in the current message's <CITATIONS>.
-
-DOCX GENERATION:
-If asked to draft or generate a document, use the generate_docx tool to produce a downloadable Word document. Always use this tool rather than just displaying the document content inline when the user asks for a document to be created.
-If the user follows up on a document you just generated and asks for changes (e.g. "make section 3 longer", "add a termination clause", "change the parties"), default to calling edit_document on that newly generated document — do NOT call generate_docx again to regenerate the whole document. Only fall back to generate_docx if the user explicitly asks for a brand-new document or the change is so sweeping that an edit would not be coherent.
-After calling generate_docx, do NOT include any download links, URLs, or markdown links to the document in your prose response — the download card is presented automatically by the UI.
-After calling generate_docx, you MUST call read_document on the returned doc_id before writing your prose response. Base your description on the generated document's actual text, not on memory of what you intended to generate.
-Your prose response MUST include a short description of the generated document: what it is, its structure (key sections/clauses), and — if the draft was informed by any provided source documents — which sources you drew from and how. Keep it concise (typically 3–8 sentences or a short bulleted list). Refer to the document by filename, never by a download link.
-When the description makes factual claims about the contents of the newly generated document, cite the generated document with [cN] markers and a <CITATIONS> block exactly as specified in the DOCUMENT CITATION INSTRUCTIONS above. If you also make factual claims about provided source documents, cite those source documents separately. Omit the <CITATIONS> block if the description makes no such claims.
-Heading hierarchy: always use Heading 1 before introducing Heading 2, Heading 2 before Heading 3, and so on. Never skip levels.
-Numbering: all numbering MUST start from 1, never 0. Never duplicate the numbering prefix in heading text — pass "Introduction", never "1. Introduction".
-Contracts: when generating a contract or agreement, always include a signatures block at the very end of the document on its own page, with a signature line for each party (party name + "By:", "Name:", "Title:", "Date:"). Contract preambles (recitals, "WHEREAS" clauses, parties block) must NOT be numbered.
-
-SPREADSHEET / EXCEL GENERATION:
-When the user asks for an Excel file, a spreadsheet, an .xlsx, or to export tabular data to Excel, use the generate_xlsx tool. Pass the column labels in `headers` and one array of cell strings per row in `rows`. If you have just shown the user a Markdown table, reuse exactly those columns and rows. NEVER reply that you cannot create Excel files — generate_xlsx is available for exactly this. After calling generate_xlsx, do NOT include any download link or URL in your prose; the download card is presented automatically by the UI. Briefly state what the spreadsheet contains (sheet, number of rows/columns).
-
-DOCUMENT EDITING:
-When using edit_document, any edit that adds, removes, or reorders a numbered clause, section, sub-clause, schedule, exhibit, or list item shifts every downstream number. You MUST update all affected numbering AND every cross-reference to those numbers in the same edit_document call:
-- Renumber the sibling clauses/sections/sub-clauses that follow the change so the sequence stays contiguous.
-- Find every in-document reference to the shifted numbers — e.g. "see Section 5", "pursuant to Clause 4.2(b)", "as set out in Schedule 3", "defined in Section 2.1" — and update them.
-- Before issuing the edits, scan the full document (use read_document or find_in_document) to enumerate affected cross-references; do not assume references only appear near the change site.
-- If you are uncertain whether a reference points to the shifted number or an unrelated number, err on the side of including it as an edit and explain in the reason field.
-- When deleting square brackets, delete both the opening `[` and the closing `]`. Never leave behind an unmatched bracket.
-
-WORKFLOWS:
-When a user message begins with a [Workflow: <title> (id: <id>)] marker, the user has selected a workflow and you MUST apply it. Immediately call the read_workflow tool with that exact id to load the workflow's full prompt, then follow those instructions for the current turn. Do this before producing any other output or calling any other tools (aside from any document reads the workflow requires). Do not ask the user to confirm — the selection itself is the instruction to apply the workflow.
-
-DOCX TEMPLATES:
-When a user message begins with a [Template: <title> (id: <id>)] marker, the user has selected a DOCX template and you MUST produce a Word document using it. Immediately call describe_docx_template with that exact id to load the authoring contract (layout, section skeleton, required metadata, per-field guidance). Then collect the needed [PLACEHOLDER] values from the conversation, write the document body in Markdown following the section_skeleton, and finally call generate_docx(template_id=..., body="<your Markdown here>", metadata={...}). The argument MUST be named `body` (a string of Markdown) — `body_md` does NOT exist and an empty / missing `body` makes the call fail. Do NOT consider the user's request fulfilled until generate_docx has succeeded and you have presented the download to the user. The Template marker can co-occur with a Workflow marker — if both are present, apply the workflow's instructions while still producing the docx as the closing step.
-
-DOCUMENT NAMING IN PROSE:
-The chat-local labels ("doc-0", "doc-1", "doc-N", ...) are internal handles for tool calls and citation JSON ONLY. NEVER write them in your prose response or in any text the user reads — not in body text, not in headings, not in lists, not in tool-activity descriptions. The user does not know what "doc-0" means and seeing it is jarring. When referring to a document in prose, always use its filename. The only places "doc-N" identifiers are allowed are inside tool-call arguments and inside the <CITATIONS> JSON block's "doc_id" field.
-
-GENERAL GUIDANCE:
-- Be precise and professional
-- Cite the specific document and quote when making claims about document content
-- When no documents are provided, answer based on your legal knowledge
-- Do not fabricate document content
-- Do not use emojis in your responses
-"#;
-
-/// System-prompt block listing a project's indexed documents. They are
-/// exposed to the assistant as `doc-N` labels (read on demand via
-/// `read_document`) — NOT loaded inline, to keep the context small.
-/// `base` offsets the labels past the inline-attached documents so the
-/// two label ranges never collide.
-fn build_project_docs_prompt(base: usize, docs: &[(String, String)]) -> String {
-    if docs.is_empty() {
-        return String::new();
-    }
-    let mut s = String::from(
-        "PROJECT DOCUMENTS — this chat belongs to a project and the \
-         documents below are already part of it. They are available to \
-         you right now: open one in full with the `read_document` tool \
-         using its label, or search it with `find_in_document`. NEVER \
-         tell the user to attach these — they are already attached. \
-         When asked which documents the project has, list exactly \
-         these:\n",
-    );
-    for (i, (_, filename)) in docs.iter().enumerate() {
-        s.push_str(&format!("  - doc-{} : {}\n", base + i, filename));
-    }
-    s
-}
-
-/// System-prompt block stating the project this chat belongs to. Without
-/// it the assistant has no notion of the project's identity and, when
-/// asked "what is the project name?", guesses it from an attached
-/// document's filename or title.
-fn build_project_context_prompt(name: &str, domain: &str) -> String {
-    format!(
-        "PROJECT CONTEXT — this chat belongs to a project. The project's \
-         name is exactly \"{name}\" and its professional domain is \
-         \"{domain}\". Whenever the user asks about \"the project\" — its \
-         name, subject, or scope — this is what they mean. NEVER infer or \
-         guess the project name from a document's filename, title, or \
-         contents: the authoritative project name is \"{name}\"."
-    )
-}
-
-fn build_doc_system_prompt(docs: &[DocPayload]) -> String {
-    let with_text: Vec<&DocPayload> = docs.iter().filter(|d| d.text.is_some()).collect();
-    let with_imgs: Vec<&DocPayload> = docs.iter().filter(|d| !d.images.is_empty()).collect();
-    if with_text.is_empty() && with_imgs.is_empty() { return String::new(); }
-
-    // Use Mike's chat-local doc-N labels so the citation system works.
-    // Labels are 1-indexed (`doc-1`, `doc-2`, …) — the previous 0-indexed
-    // scheme produced an off-by-one bug when filename numbering was
-    // 1-based (e.g. CARTELLA_TEST_001..010): the model would refer to
-    // "the 10th doc" as `doc-10` instead of `doc-9` and `read_document`
-    // returned "not found". 1-indexed labels match human counting and
-    // typical filename conventions.
-    let mut s = String::from(
-        "The user has attached the following documents. Use them to answer the question. \
-         Cite the document name when relevant. The 'doc-N' label is for use in <CITATIONS> JSON only — \
-         in prose, refer to documents by their filename.\n\n",
-    );
-    for (idx, d) in with_text.iter().enumerate() {
-        s.push_str(&format!(
-            "=== {label} (filename: {fname}) ===\n{body}\n\n",
-            label = format!("doc-{}", idx + 1),
-            fname = d.filename,
-            body = d.text.as_deref().unwrap_or("")
-        ));
-    }
-    let img_offset = with_text.len();
-    for (i, d) in with_imgs.iter().enumerate() {
-        s.push_str(&format!(
-            "=== {label} (filename: {fname}, rendered as {n} page image(s) attached below) ===\n\n",
-            label = format!("doc-{}", img_offset + i + 1),
-            fname = d.filename,
-            n = d.images.len()
-        ));
-    }
-    s
-}
-
-fn collect_images(docs: &[DocPayload]) -> Vec<String> {
-    docs.iter().flat_map(|d| d.images.clone()).collect()
 }
 
 /// One retrieved KB chunk plus the citation tag it was rendered with so
@@ -2079,153 +1875,6 @@ async fn list_indexed_corpus_docs(
             status,
         })
         .collect()
-}
-
-/// Render the library inventory as a system-prompt block. Only docs
-/// that have been **fully indexed** (status = "ready") are listed as
-/// retrievable; documents in "syncing" or "interrupted" state are
-/// surfaced separately so the model can tell the user about them but
-/// shouldn't pretend to have their text available.
-fn build_library_inventory_prompt(entries: &[CorpusInventoryEntry]) -> String {
-    if entries.is_empty() {
-        return String::new();
-    }
-    let mut ready: Vec<&CorpusInventoryEntry> = Vec::new();
-    let mut other: Vec<&CorpusInventoryEntry> = Vec::new();
-    for e in entries {
-        if e.status == "ready" {
-            ready.push(e);
-        } else {
-            other.push(e);
-        }
-    }
-
-    let mut s = String::from(
-        "<USER LIBRARY — authoritative corpus documents indexed for this user>\n\
-         This is an awareness list ONLY. The documents below are indexed and \
-         retrievable. When a question matches one of them, the relevant \
-         passages appear in the <KNOWLEDGE BASE> block above tagged \
-         [g1]/[g2]/[p1]/...\n\
-         \n\
-         IF <KNOWLEDGE BASE> CONTAINS [gN]/[pN] TAGS:\n\
-           · Use them and cite via the rules in that section. The user's \
-             documents are authoritative.\n\
-         \n\
-         IF <KNOWLEDGE BASE> IS EMPTY OR HAS NO RELEVANT MATCH:\n\
-           · The semantic match was below threshold, NOT that the document \
-             is missing. Do NOT say \"not currently loaded\" or \"not \
-             available for direct querying\" — those phrasings are wrong \
-             and confuse the user.\n\
-           · You may answer from general knowledge if confident, BUT state \
-             plainly that the answer isn't grounded in the user's library, \
-             and suggest the user re-phrase or attach the doc directly if \
-             they want a citation-backed answer.\n\
-         \n\
-         CITATION DOC_ID RULES (mandatory):\n\
-           · NEVER use the inventory identifiers below (e.g. \"32016R0679\", \
-             \"eurlex_32016R0679\") as `doc_id` in <CITATIONS>. Those are \
-             corpus references, NOT citation handles.\n\
-           · NEVER invent doc-N labels when no files are attached to this \
-             chat — only use doc-N if the user actually attached a file.\n\
-           · The ONLY valid `doc_id` values are: (a) the [gN]/[pN] tags from \
-             <KNOWLEDGE BASE>, or (b) the doc-N labels of files actually \
-             attached to this chat. Anything else gets dropped or mis-routed.\n\
-         \n\
-         If asked \"what do you have?\" or \"do you know X?\", answer based on \
-         this list (no citation needed for the meta-answer).\n\n",
-    );
-    if !ready.is_empty() {
-        s.push_str("Indexed and ready:\n");
-        for e in &ready {
-            s.push_str(&format!(
-                "  · [{corpus}] {ident}: {title} ({lang})\n",
-                corpus = e.corpus_id,
-                ident = e.identifier,
-                title = e.title,
-                lang = e.language.to_uppercase(),
-            ));
-        }
-    }
-    if !other.is_empty() {
-        s.push_str("\nIndexing in progress / interrupted (not yet retrievable):\n");
-        for e in &other {
-            s.push_str(&format!(
-                "  · [{corpus}] {ident}: {title} — {status}\n",
-                corpus = e.corpus_id,
-                ident = e.identifier,
-                title = e.title,
-                status = e.status,
-            ));
-        }
-    }
-    s
-}
-
-/// Render retrieved chunks as a `<KNOWLEDGE BASE>` section. Empty
-/// string when there are no chunks — the caller skips the section
-/// entirely so we don't pollute the prompt with empty headers.
-fn build_kb_system_prompt(chunks: &[RetrievedKbEntry]) -> String {
-    if chunks.is_empty() {
-        return String::new();
-    }
-    let mut s = String::from(
-        "<KNOWLEDGE BASE — retrieved excerpts (not full documents)>\n\
-         These are partial passages selected by similarity to the user's question. \
-         They come from the user's indexed library; they are NOT authoritative full \
-         documents. If you need full context for any of them, either call the \
-         `search_kb` tool to fetch more passages from the same area, or ask the \
-         user to attach the document via the paperclip.\n\n",
-    );
-    for c in chunks {
-        let basename = std::path::Path::new(&c.source_path)
-            .file_name()
-            .map(|f| f.to_string_lossy().to_string())
-            .unwrap_or_else(|| c.source_path.clone());
-        s.push_str(&format!(
-            "[{tag}] {scope} · {fname} (chunk {idx}):\n«{text}»\n\n",
-            tag = c.tag,
-            scope = c.scope_label,
-            fname = basename,
-            idx = c.chunk_index,
-            text = c.text,
-        ));
-    }
-    s.push_str(
-        "CITING THESE PASSAGES (mandatory — read carefully):\n\
-         When you cite ANY of the passages above:\n\
-           1. Write the [tag] VERBATIM in your prose at the point of \
-              reference — for example: \"Articolo 35 GDPR [g1]\".\n\
-           2. INCLUDE a matching entry in the <CITATIONS> JSON block at \
-              the end of your response. The KB tag IS your citation \
-              identifier — these passages count as document references \
-              and the <CITATIONS> block applies to them exactly the same \
-              way it applies to attached documents.\n\
-           3. In the <CITATIONS> entry, set BOTH \"ref\" and \"doc_id\" \
-              to the EXACT tag you used inline (\"g1\", \"g2\", \"p1\", \
-              etc.) — NOT a bare number, NOT \"doc-0\", NOT a filename. \
-              \"ref\" must equal the marker text in your prose.\n\
-           4. The `quote` field MUST be a verbatim substring of the \
-              passage text shown above between «…» — do NOT translate, \
-              paraphrase, summarise, or correct typography. Copy the \
-              exact characters (including the original language and \
-              punctuation). The viewer text-searches the PDF for this \
-              quote to highlight it; any deviation breaks the highlight.\n\
-              If you want to discuss the passage in the user's language \
-              (e.g. translate while answering), do that in your prose, \
-              but keep the JSON `quote` in the original.\n\n\
-         Example for KB tags only:\n\
-         \n\
-         Prose: \"L'articolo 35 GDPR richiede una DPIA [g1].\"\n\
-         <CITATIONS>\n\
-         [\n  {\"ref\": \"g1\", \"doc_id\": \"g1\", \"quote\": \"...\"}\n]\n\
-         </CITATIONS>\n\n\
-         Skipping the <CITATIONS> block when you used [gN]/[pN] tags is \
-         a bug — the UI relies on it to render the clickable pill that \
-         opens the source document. The block is REQUIRED whenever any \
-         [tag] appears in your prose.\n\
-         </KNOWLEDGE BASE>\n",
-    );
-    s
 }
 
 /// Remove the `[Page N]` markers our PDF scanner prepends to each
@@ -3048,147 +2697,193 @@ async fn create_chat_record(
     (StatusCode::OK, Json(json!({ "id": id }))).into_response()
 }
 
-/// SSE handler for the upstream-Mike `POST /chat` shape.
-/// Body: { messages: [{role, content}], chat_id?, model? }
-/// Emits `data: {type: ...}` events that useAssistantChat parses.
+/// SSE for `POST /chat`.
+/// Body: { messages: [{role, content, files?, workflow?, template?}], chat_id?, model? }
+/// Emits `data: {type: ...}` events read by the chat client.
+type SseSender = tokio::sync::mpsc::Sender<Result<Event, Infallible>>;
+
+/// Sends an SSE event. `false` if the client has disconnected.
+async fn emit(tx: &SseSender, payload: &Value) -> bool {
+    tx.send(Ok(Event::default().data(payload.to_string())))
+        .await
+        .is_ok()
+}
+
+/// Appends text to the reply and shows it in the chat right away.
+async fn emit_visible_text(tx: &SseSender, full_response: &mut String, text: &str) {
+    full_response.push_str(text);
+    emit(tx, &json!({ "type": "content_delta", "text": text })).await;
+}
+
+fn sql_placeholders(n: usize) -> String {
+    vec!["?"; n].join(",")
+}
+
+/// The user's last message as it is stored: original text (without the
+/// model-facing markers) and serialised structured metadata.
+struct LastUserMessage {
+    content: String,
+    files: Option<String>,
+    workflow: Option<String>,
+    template: Option<String>,
+}
+
+/// `/chat` payload parsed in a single pass.
+#[derive(Default)]
+struct ParsedChatRequest {
+    messages: Vec<Message>,
+    /// Attached documents, in order of first appearance.
+    doc_ids: Vec<String>,
+    /// Attachments for which the user requested personal-data protection.
+    pii_protected_ids: HashSet<String>,
+    last_user: Option<LastUserMessage>,
+}
+
+fn parse_chat_request(body: &Value) -> ParsedChatRequest {
+    let mut out = ParsedChatRequest::default();
+    let Some(items) = body.get("messages").and_then(Value::as_array) else {
+        return out;
+    };
+    out.messages.reserve(items.len());
+
+    for m in items {
+        if let Some(files) = m.get("files").and_then(Value::as_array) {
+            for f in files {
+                let Some(id) = f.get("document_id").and_then(Value::as_str) else { continue };
+                if !out.doc_ids.iter().any(|x| x == id) {
+                    out.doc_ids.push(id.to_string());
+                }
+                if f.get("pii_protected").and_then(Value::as_bool).unwrap_or(false) {
+                    out.pii_protected_ids.insert(id.to_string());
+                }
+            }
+        }
+
+        let Some(role_name) = m.get("role").and_then(Value::as_str) else { continue };
+        let content = m.get("content").and_then(Value::as_str).unwrap_or("");
+        let role = match role_name {
+            "user" => Role::User,
+            "assistant" => Role::Assistant,
+            "tool" => Role::Tool,
+            _ => continue,
+        };
+
+        let content = if matches!(role, Role::User) {
+            out.last_user = Some(LastUserMessage {
+                content: content.to_string(),
+                files: m
+                    .get("files")
+                    .filter(|v| v.as_array().is_some_and(|a| !a.is_empty()))
+                    .map(Value::to_string),
+                workflow: m.get("workflow").filter(|v| v.is_object()).map(Value::to_string),
+                template: m.get("template").filter(|v| v.is_object()).map(Value::to_string),
+            });
+            with_selection_markers(m, content)
+        } else {
+            content.to_string()
+        };
+
+        out.messages.push(Message {
+            role,
+            content,
+            images: vec![],
+            tool_calls: vec![],
+            tool_call_id: None,
+            tool_name: None,
+        });
+    }
+    out
+}
+
+/// The workflow and DOCX template picked in the composer arrive as JSON fields;
+/// the model recognises them as markers at the start of the message (see
+/// `config/system-prompts/base.md`, sezione 7).
+fn with_selection_markers(message: &Value, content: &str) -> String {
+    let marker = |key: &str, kind: &str| {
+        let obj = message.get(key)?;
+        let id = obj.get("id").and_then(Value::as_str)?;
+        let title = obj.get("title").and_then(Value::as_str).unwrap_or("");
+        Some(format!("[{kind}: {title} (id: {id})]\n"))
+    };
+    let workflow = marker("workflow", "Workflow");
+    let template = marker("template", "Template");
+    if workflow.is_none() && template.is_none() {
+        return content.to_string();
+    }
+    let mut out = String::with_capacity(content.len() + 128);
+    out.push_str(workflow.as_deref().unwrap_or(""));
+    out.push_str(template.as_deref().unwrap_or(""));
+    out.push('\n');
+    out.push_str(content);
+    out
+}
+
+/// The user's interface language and default domain.
+async fn fetch_locale_and_default_domain(state: &AppState, user_id: &str) -> (String, Option<String>) {
+    let row: Option<(Option<String>, Option<String>)> =
+        sqlx::query_as("SELECT locale, default_domain FROM user_settings WHERE user_id = ?")
+            .bind(user_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten();
+    let (locale, default_domain) = row.unwrap_or((None, None));
+    let locale = locale
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("it")
+        .to_string();
+    (locale, default_domain)
+}
+
 async fn stream_chat_root(
     state: Arc<AppState>,
     auth: AuthUser,
     body: Value,
 ) -> Response {
-    let model_request = body.get("model").and_then(|v| v.as_str()).map(|s| s.to_string());
-    let chat_id_in = body.get("chat_id").and_then(|v| v.as_str()).map(|s| s.to_string());
+    let model_request = body.get("model").and_then(Value::as_str).map(str::to_string);
 
-    // Resolve / create chat row
-    let (chat_id, is_new_chat) = match chat_id_in.clone() {
-        Some(id) => {
-            let exists: Option<(String,)> = sqlx::query_as(
-                "SELECT id FROM chats WHERE id = ? AND user_id = ?",
-            )
-            .bind(&id)
-            .bind(&auth.user_id)
-            .fetch_optional(&state.db)
-            .await
-            .ok()
-            .flatten();
-            if exists.is_none() {
-                return (StatusCode::NOT_FOUND, Json(json!({"detail": "Chat not found"}))).into_response();
+    // Existing chat: a single query checks ownership and reads the project.
+    let (chat_id, is_new_chat, chat_project_id) =
+        match body.get("chat_id").and_then(Value::as_str) {
+            Some(id) => {
+                let row: Option<(Option<String>,)> =
+                    sqlx::query_as("SELECT project_id FROM chats WHERE id = ? AND user_id = ?")
+                        .bind(id)
+                        .bind(&auth.user_id)
+                        .fetch_optional(&state.db)
+                        .await
+                        .ok()
+                        .flatten();
+                let Some((project_id,)) = row else {
+                    return (StatusCode::NOT_FOUND, Json(json!({"detail": "Chat not found"})))
+                        .into_response();
+                };
+                (id.to_string(), false, project_id)
             }
-            (id, false)
-        }
-        None => {
-            let id = uuid::Uuid::new_v4().to_string();
-            if let Err(e) = sqlx::query(
-                "INSERT INTO chats (id, user_id, project_id, title) VALUES (?, ?, NULL, NULL)",
-            )
-            .bind(&id)
-            .bind(&auth.user_id)
-            .execute(&state.db)
-            .await
-            {
-                return (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"detail": e.to_string()}))).into_response();
-            }
-            (id, true)
-        }
-    };
-
-    // Parse messages from the request body. The frontend sends the entire
-    // running history; persist only the *last* user message.
-    //
-    // Each message carries optional structured `workflow` and `template`
-    // chips set by the chat composer. The system prompt instructs the
-    // LLM to look for `[Workflow: <title> (id: <id>)]` and
-    // `[Template: <title> (id: <id>)]` markers at the start of the user
-    // message — but the markers aren't sent over the wire as inline
-    // text, they're carried as JSON fields. We materialise them into
-    // the content here so the LLM observes them where its instructions
-    // expect them to be.
-    type ParsedMessage = (
-        String,             // role
-        String,             // content (with markers prepended)
-        Option<String>,     // template_id if any, used downstream by chat handler
-    );
-    let messages_in: Vec<ParsedMessage> = body
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|m| {
-                    let role = m.get("role").and_then(|r| r.as_str())?.to_string();
-                    let content = m
-                        .get("content")
-                        .and_then(|c| c.as_str())
-                        .unwrap_or("")
-                        .to_string();
-                    let wf_marker = m.get("workflow").and_then(|wf| {
-                        let id = wf.get("id").and_then(|v| v.as_str())?;
-                        let title =
-                            wf.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        Some(format!("[Workflow: {title} (id: {id})]"))
-                    });
-                    let template_id_for_chat = m
-                        .get("template")
-                        .and_then(|t| t.get("id"))
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string());
-                    let tpl_marker = m.get("template").and_then(|tpl| {
-                        let id = tpl.get("id").and_then(|v| v.as_str())?;
-                        let title =
-                            tpl.get("title").and_then(|v| v.as_str()).unwrap_or("");
-                        Some(format!("[Template: {title} (id: {id})]"))
-                    });
-                    // Compose: markers first, then a blank line, then
-                    // the user's actual text. Markers don't apply to
-                    // assistant or tool messages — only user picks chips.
-                    let augmented = if role == "user" && (wf_marker.is_some() || tpl_marker.is_some()) {
-                        let mut prefix = String::new();
-                        if let Some(m) = wf_marker {
-                            prefix.push_str(&m);
-                            prefix.push('\n');
-                        }
-                        if let Some(m) = tpl_marker {
-                            prefix.push_str(&m);
-                            prefix.push('\n');
-                        }
-                        format!("{prefix}\n{content}")
-                    } else {
-                        content
-                    };
-                    Some((role, augmented, template_id_for_chat))
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // Collect document_ids from message-level attachments. Also
-    // record which attachments the user flagged with PII protection
-    // (the per-file checkbox in the chat composer). When the
-    // `ner-pii` feature is built in we'll run those docs' text
-    // through `crate::ner::mask_pii` before stuffing it into the
-    // LLM payload.
-    let mut doc_ids: Vec<String> = Vec::new();
-    let mut pii_protected_ids: std::collections::HashSet<String> =
-        std::collections::HashSet::new();
-    if let Some(arr) = body.get("messages").and_then(|v| v.as_array()) {
-        for m in arr {
-            if let Some(files) = m.get("files").and_then(|v| v.as_array()) {
-                for f in files {
-                    if let Some(id) = f.get("document_id").and_then(|v| v.as_str()) {
-                        if !doc_ids.iter().any(|x| x == id) {
-                            doc_ids.push(id.to_string());
-                        }
-                        let pii = f
-                            .get("pii_protected")
-                            .and_then(|v| v.as_bool())
-                            .unwrap_or(false);
-                        if pii {
-                            pii_protected_ids.insert(id.to_string());
-                        }
-                    }
+            None => {
+                let id = uuid::Uuid::new_v4().to_string();
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO chats (id, user_id, project_id, title) VALUES (?, ?, NULL, NULL)",
+                )
+                .bind(&id)
+                .bind(&auth.user_id)
+                .execute(&state.db)
+                .await
+                {
+                    return (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(json!({"detail": e.to_string()})),
+                    )
+                        .into_response();
                 }
+                (id, true, None)
             }
-        }
-    }
+        };
+
+    let ParsedChatRequest { messages, mut doc_ids, pii_protected_ids, last_user } =
+        parse_chat_request(&body);
     tracing::info!(
         "[chat] payload parsed — attachments={} pii_protected={} (ner-pii built-in: {})",
         doc_ids.len(),
@@ -3196,41 +2891,32 @@ async fn stream_chat_root(
         cfg!(feature = "ner-pii"),
     );
 
-    // Persist the per-document PII-protection flag (migration 0028).
-    // Before this column existed, the flag lived only on the current
-    // request payload — fine for the upload turn, but follow-up
-    // text-only turns re-fetched the document from chat history
-    // without the flag and sent the raw text to the LLM. With the
-    // column, once a user has opted-in on a file it stays protected
-    // for every subsequent turn of every chat that references it.
-    for id in &pii_protected_ids {
-        let _ = sqlx::query(
-            "UPDATE documents SET pii_protected = 1 WHERE id = ? AND user_id = ?",
-        )
-        .bind(id)
-        .bind(&auth.user_id)
-        .execute(&state.db)
-        .await;
+    // Personal-data protection stays on the document (migration
+    // 0028): later turns without the attachment still honour it.
+    if !pii_protected_ids.is_empty() {
+        let sql = format!(
+            "UPDATE documents SET pii_protected = 1 WHERE user_id = ? AND id IN ({})",
+            sql_placeholders(pii_protected_ids.len())
+        );
+        let mut q = sqlx::query(&sql).bind(&auth.user_id);
+        for id in &pii_protected_ids {
+            q = q.bind(id);
+        }
+        if let Err(e) = q.execute(&state.db).await {
+            tracing::warn!("[chat] failed to persist pii_protected flags: {e}");
+        }
     }
 
-    // Stamp this chat onto any newly attached cache documents so
-    // chat-deletion can sweep their on-disk files (see migration
-    // 0013). Restrictions:
-    //   - chat_id IS NULL  → don't reroute a doc already linked to
-    //     another chat (its cleanup belongs there).
-    //   - content_hash IS NOT NULL  → only true for cache uploads.
-    //     Project-scoped or pre-cache docs must NOT inherit chat_id,
-    //     otherwise deleting the chat would cascade them away even
-    //     though they live in a project library.
+    // Link new cached attachments to the chat, so deleting the
+    // chat removes their files (migration 0013). Only documents not yet
+    // linked (`chat_id IS NULL`) and uploaded to the cache (`content_hash`):
+    // project documents must not follow the chat.
     if !doc_ids.is_empty() {
-        let placeholders = doc_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
         let sql = format!(
             "UPDATE documents SET chat_id = ? \
-             WHERE user_id = ? \
-               AND chat_id IS NULL \
-               AND content_hash IS NOT NULL \
+             WHERE user_id = ? AND chat_id IS NULL AND content_hash IS NOT NULL \
                AND id IN ({})",
-            placeholders
+            sql_placeholders(doc_ids.len())
         );
         let mut q = sqlx::query(&sql).bind(&chat_id).bind(&auth.user_id);
         for id in &doc_ids {
@@ -3238,184 +2924,92 @@ async fn stream_chat_root(
         }
         match q.execute(&state.db).await {
             Ok(res) => tracing::info!(
-                "[chat] linked {}/{} attached cache doc(s) to chat {}",
+                "[chat] linked {}/{} attached cache doc(s) to chat {chat_id}",
                 res.rows_affected(),
-                doc_ids.len(),
-                chat_id
+                doc_ids.len()
             ),
-            Err(e) => tracing::warn!(
-                "[chat] failed to link attached docs to chat {}: {}",
-                chat_id,
-                e
-            ),
+            Err(e) => tracing::warn!("[chat] failed to link attached docs to chat {chat_id}: {e}"),
         }
     }
 
-    // Also pull in every document already linked to this chat from an
-    // earlier turn. On a reopened chat the frontend no longer carries the
-    // attachment in the message payload, so without this a follow-up turn
-    // would drop the document from context and — worse — its `[cN]`
-    // citations would resolve to no `document_id`, leaving the viewer with
-    // a "document not found" on a document that was never actually lost.
-    // Appended after the payload ids so existing `doc-N` indices stay
-    // stable when the payload does still carry the files.
-    if let Ok(rows) = sqlx::query_as::<_, (String,)>(
-        "SELECT id FROM documents WHERE chat_id = ? AND user_id = ? ORDER BY created_at ASC",
-    )
-    .bind(&chat_id)
-    .bind(&auth.user_id)
-    .fetch_all(&state.db)
-    .await
-    {
-        for (id,) in rows {
-            if !doc_ids.iter().any(|x| x == &id) {
-                doc_ids.push(id);
-            }
+    // Independent queries in parallel: attachments from earlier turns,
+    // project documents (labelled and read on demand, not loaded
+    // in full) and project identity.
+    let (earlier_docs, project_documents, project_meta) = tokio::join!(
+        async {
+            sqlx::query_as::<_, (String,)>(
+                "SELECT id FROM documents WHERE chat_id = ? AND user_id = ? ORDER BY created_at ASC",
+            )
+            .bind(&chat_id)
+            .bind(&auth.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default()
+        },
+        async {
+            let Some(pid) = &chat_project_id else { return Vec::new() };
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT id, filename FROM documents \
+                 WHERE project_id = ? AND user_id = ? AND status = 'ready' \
+                 ORDER BY created_at ASC",
+            )
+            .bind(pid)
+            .bind(&auth.user_id)
+            .fetch_all(&state.db)
+            .await
+            .unwrap_or_default()
+        },
+        async {
+            let Some(pid) = &chat_project_id else { return None };
+            sqlx::query_as::<_, (String, String)>(
+                "SELECT name, domain FROM projects WHERE id = ? AND user_id = ?",
+            )
+            .bind(pid)
+            .bind(&auth.user_id)
+            .fetch_optional(&state.db)
+            .await
+            .ok()
+            .flatten()
+        },
+    );
+    // Appended at the end: doc-N labels already assigned don't change.
+    for (id,) in earlier_docs {
+        if !doc_ids.contains(&id) {
+            doc_ids.push(id);
         }
     }
-
-    // Project documents — when this chat belongs to a project, the
-    // project's indexed documents are made available to the assistant
-    // as labelled, read-on-demand entries (so it never tells the user
-    // to attach documents that are already in the project). They are
-    // NOT appended to `doc_ids`: that would load every project doc
-    // inline on every turn. Instead they get `doc-N` labels after the
-    // inline attachments and an inventory line in the system prompt.
-    let chat_project_id: Option<String> = sqlx::query_as::<_, (Option<String>,)>(
-        "SELECT project_id FROM chats WHERE id = ?",
-    )
-    .bind(&chat_id)
-    .fetch_optional(&state.db)
-    .await
-    .ok()
-    .flatten()
-    .and_then(|(p,)| p);
-    let project_documents: Vec<(String, String)> = if let Some(pid) = &chat_project_id {
-        sqlx::query_as::<_, (String, String)>(
-            "SELECT id, filename FROM documents \
-             WHERE project_id = ? AND user_id = ? AND status = 'ready' \
-             ORDER BY created_at ASC",
-        )
-        .bind(pid)
-        .bind(&auth.user_id)
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default()
+    let project_documents: Vec<(String, String)> = project_documents
         .into_iter()
         .filter(|(id, _)| !doc_ids.contains(id))
-        .collect()
-    } else {
-        Vec::new()
-    };
-
-    // Project identity (name + domain) — surfaced in the system prompt
-    // so the assistant answers "what is the project name?" with the
-    // actual project, not a filename guessed from an attached document.
-    let project_meta: Option<(String, String)> = if let Some(pid) = &chat_project_id {
-        sqlx::query_as::<_, (String, String)>(
-            "SELECT name, domain FROM projects WHERE id = ? AND user_id = ?",
-        )
-        .bind(pid)
-        .bind(&auth.user_id)
-        .fetch_optional(&state.db)
-        .await
-        .ok()
-        .flatten()
-    } else {
-        None
-    };
-
-    // Persist the *last* user message. We store:
-    //   - the ORIGINAL content (raw user-typed text), not the
-    //     marker-augmented form that goes to the LLM — markers like
-    //     `[Workflow: ...]` are an LLM-side hint, putting them in the
-    //     replayable history would surface as literal text on chat
-    //     reopen.
-    //   - the structured `files` / `workflow` / `template` JSON blobs
-    //     so the composer pills come back when the chat is reopened
-    //     (see migration 0021).
-    let last_user_msg_json = body
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .and_then(|arr| {
-            arr.iter().rev().find(|m| {
-                m.get("role").and_then(|r| r.as_str()) == Some("user")
-            })
-        });
-    if let Some(msg) = last_user_msg_json {
-        let raw_content = msg
-            .get("content")
-            .and_then(|c| c.as_str())
-            .unwrap_or("")
-            .to_string();
-        if !raw_content.trim().is_empty() {
-            // Serialise structured metadata to JSON strings, NULL when
-            // absent/empty so the column matches the "no metadata"
-            // shape every existing row already carries.
-            let files_json = msg
-                .get("files")
-                .filter(|v| v.is_array() && !v.as_array().map(|a| a.is_empty()).unwrap_or(true))
-                .map(|v| v.to_string());
-            let workflow_json = msg
-                .get("workflow")
-                .filter(|v| v.is_object())
-                .map(|v| v.to_string());
-            let template_json = msg
-                .get("template")
-                .filter(|v| v.is_object())
-                .map(|v| v.to_string());
-
-            let user_msg_id = uuid::Uuid::new_v4().to_string();
-            let _ = sqlx::query(
-                "INSERT INTO messages (id, chat_id, role, content, files, workflow, template) \
-                 VALUES (?, ?, 'user', ?, ?, ?, ?)",
-            )
-            .bind(&user_msg_id)
-            .bind(&chat_id)
-            .bind(&raw_content)
-            .bind(&files_json)
-            .bind(&workflow_json)
-            .bind(&template_json)
-            .execute(&state.db)
-            .await;
-        }
-    }
-
-    let messages: Vec<Message> = messages_in
-        .iter()
-        .filter_map(|(role, content, _template_id)| {
-            let r = match role.as_str() {
-                "user" => Role::User,
-                "assistant" => Role::Assistant,
-                "tool" => Role::Tool,
-                _ => return None,
-            };
-            Some(Message {
-                role: r,
-                content: content.clone(),
-                images: vec![],
-                tool_calls: vec![],
-                tool_call_id: None,
-                tool_name: None,
-            })
-        })
         .collect();
 
-    // Resolve LLM config from the user's saved settings
+    // Store the original text, without markers, with the metadata that
+    // rebuilds the composer pills when the chat is reopened (migration 0021).
+    if let Some(msg) = last_user.filter(|m| !m.content.trim().is_empty()) {
+        let _ = sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, files, workflow, template) \
+             VALUES (?, ?, 'user', ?, ?, ?, ?)",
+        )
+        .bind(uuid::Uuid::new_v4().to_string())
+        .bind(&chat_id)
+        .bind(&msg.content)
+        .bind(&msg.files)
+        .bind(&msg.workflow)
+        .bind(&msg.template)
+        .execute(&state.db)
+        .await;
+    }
+
     let user_settings = fetch_llm_settings(&state.db, &auth.user_id).await.ok();
     let raw_model = model_request
         .or_else(|| user_settings.as_ref().and_then(|s| s.main_model.clone()))
         .unwrap_or_else(|| "gemini-3.5-flash".to_string());
-
     let local_config = build_local_config(&raw_model, user_settings.as_ref());
-
     let vision_ok = llm::is_vision_capable(&raw_model);
 
-    // Last user message is what we embed for retrieval. We deliberately
-    // skip the conversation history because cosine on the running
-    // history smears across topics; the latest turn captures intent
-    // best. See the strategy doc for the rationale.
-    let last_user_query: String = messages
+    // Retrieval uses only the last question: the full history
+    // mixes different topics and worsens similarity.
+    let last_user_query = messages
         .iter()
         .rev()
         .find(|m| matches!(m.role, Role::User))
@@ -3423,1581 +3017,878 @@ async fn stream_chat_root(
         .unwrap_or_default();
     let kb_top_k = if doc_ids.is_empty() { 8 } else { 6 };
 
-    // SSE channel + spawn the whole pipeline as a background task so the
-    // HTTP response can start streaming immediately. Before this change
-    // load_attached_docs (PDF text extraction + PII redaction) and the
-    // history summarizer call ran INSIDE the handler — `Sse::new` only
-    // returned after all that finished, so the browser saw no body bytes
-    // for the multi-minute window during which doc_extract / pii_redact
-    // events were being emitted. They just buffered in the channel and
-    // flushed all at once when the response finally went out. Moving the
-    // setup work inside the spawn lets the client connect as soon as
-    // the handler returns and observe each event the moment it fires.
+    // The heavy work (text extraction, personal-data redaction,
+    // history summarisation) runs in the task, so the client receives the
+    // progress events as they happen instead of all together at the end.
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
-    let state_clone = state.clone();
-    let chat_id_clone = chat_id.clone();
+    tokio::spawn(run_chat_turn(
+        ChatTurn {
+            state,
+            user_id: auth.user_id,
+            chat_id,
+            is_new_chat,
+            messages,
+            doc_ids,
+            pii_protected_ids,
+            project_documents,
+            project_meta,
+            user_settings,
+            raw_model,
+            local_config,
+            vision_ok,
+            last_user_query,
+            kb_top_k,
+        },
+        tx,
+    ));
 
-    tokio::spawn(async move {
-        if is_new_chat {
-            let chat_id_event = json!({ "type": "chat_id", "chatId": &chat_id_clone });
-            let _ = tx
-                .send(Ok(Event::default().data(chat_id_event.to_string())))
-                .await;
-        }
+    Sse::new(ReceiverStream::new(rx))
+        .keep_alive(axum::response::sse::KeepAlive::default())
+        .into_response()
+}
 
-        // PII redaction inside load_attached_docs emits per-chunk
-        // progress events on the same channel that carries the rest
-        // of the stream (rendered text deltas, citations, tool calls).
-        let tx_for_redact = tx.clone();
+/// Everything needed to run a chat turn in the background task.
+struct ChatTurn {
+    state: Arc<AppState>,
+    user_id: String,
+    chat_id: String,
+    is_new_chat: bool,
+    messages: Vec<Message>,
+    doc_ids: Vec<String>,
+    pii_protected_ids: HashSet<String>,
+    project_documents: Vec<(String, String)>,
+    project_meta: Option<(String, String)>,
+    user_settings: Option<crate::routes::user::LlmSettings>,
+    raw_model: String,
+    local_config: Option<LocalConfig>,
+    vision_ok: bool,
+    last_user_query: String,
+    kb_top_k: usize,
+}
 
-        // Discover MCP, load attached docs, retrieve KB chunks, and pull
-        // a library inventory in parallel. The inventory is what tells the
-        // model "the user has the GDPR and AI Act in their indexed library"
-        // even when the user's question doesn't surface those documents
-        // via semantic match — without it, the model defaults to "I don't
-        // have access to your synced documents."
-        let (attached_docs, mcp_servers, kb_chunks, library_inventory) = tokio::join!(
-            load_attached_docs(
-                &state_clone,
-                &auth.user_id,
-                &doc_ids,
-                vision_ok,
-                &pii_protected_ids,
-                &tx_for_redact,
-            ),
-            discover_mcp_for_user(&state_clone, &auth.user_id),
-            retrieve_kb_chunks(&state_clone, &auth.user_id, &chat_id_clone, &last_user_query, kb_top_k),
-            list_indexed_corpus_docs(&state_clone, &auth.user_id),
-        );
+/// Maximum loop iterations for a turn (each tool call
+/// uses one). 20 covers analysis across a dozen documents
+/// and still bounds a stuck loop.
+const MAX_TOOL_ITERATIONS: u32 = 20;
+/// Nudges to the model when it ends the turn with no text and no tools
+/// (happens mostly with Gemini right after a tool result).
+const MAX_EMPTY_ANSWER_RETRIES: u32 = 2;
 
-        // Compose: Mike base + library inventory + KB excerpts + attached
-        // full-text + MCP. Library inventory comes near the top so the
-        // model orients itself before the semantic-retrieval block —
-        // which may have missed documents the user has but didn't trigger.
-        let inventory_prompt = build_library_inventory_prompt(&library_inventory);
-        let mcp_prompt = build_mcp_system_prompt(&mcp_servers);
-        let docs_prompt = build_doc_system_prompt(&attached_docs);
-        let kb_prompt = build_kb_system_prompt(&kb_chunks);
-        // Stable prefix — identical across the turns of a chat. Sent as a
-        // cacheable block (see StreamParams::system_prompt). The per-query
-        // KB retrieval is deliberately NOT joined here: it changes every
-        // turn and would invalidate the cache, so it travels separately as
-        // the volatile tail.
-        // Domain-aware prologue (see crate::presets::system_prompt).
-        // The domain resolves from the chat's project (if any) →
-        // user_settings.default_domain → "others". The locale comes
-        // from user_settings.locale → "it" (MikeRust's primary
-        // language). Prepended FIRST so it sets the role before the
-        // generic Mike tool-use / citation rules.
-        let domain_locale: (String, String) = {
-            let row: Option<(Option<String>, Option<String>)> = sqlx::query_as(
-                "SELECT locale, default_domain FROM user_settings WHERE user_id = ?",
-            )
-            .bind(&auth.user_id)
-            .fetch_optional(&state_clone.db)
-            .await
-            .ok()
-            .flatten();
-            let (locale_opt, default_domain_opt) = row.unwrap_or((None, None));
-            let locale = locale_opt
-                .as_deref()
-                .map(|s| s.trim())
-                .filter(|s| !s.is_empty())
-                .unwrap_or("it")
-                .to_string();
-            // Project domain wins over user default — the project is
-            // the more specific scope and almost always carries the
-            // authoritative vertical for everything that happens in
-            // its chats.
-            let domain = project_meta
-                .as_ref()
-                .map(|(_, pdomain)| pdomain.clone())
-                .or(default_domain_opt)
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| "others".to_string());
-            (locale, domain)
-        };
-        let domain_prologue = crate::presets::system_prompt::assemble_prologue(
-            &domain_locale.0,
-            &domain_locale.1,
-        );
+async fn run_chat_turn(turn: ChatTurn, tx: SseSender) {
+    let ChatTurn {
+        state,
+        user_id,
+        chat_id,
+        is_new_chat,
+        messages,
+        doc_ids,
+        pii_protected_ids,
+        project_documents,
+        project_meta,
+        user_settings,
+        raw_model,
+        local_config,
+        vision_ok,
+        last_user_query,
+        kb_top_k,
+    } = turn;
 
-        let mut sections: Vec<String> = Vec::new();
-        sections.push(domain_prologue);
-        sections.push(MRUST_SYSTEM_PROMPT.trim().to_string());
-        if !inventory_prompt.is_empty() {
-            sections.push(inventory_prompt);
-        }
-        if !docs_prompt.is_empty() {
-            sections.push(docs_prompt);
-        }
-        if let Some((pname, pdomain)) = &project_meta {
-            sections.push(build_project_context_prompt(pname, pdomain));
-        }
-        let project_docs_prompt =
-            build_project_docs_prompt(doc_ids.len(), &project_documents);
-        if !project_docs_prompt.is_empty() {
-            sections.push(project_docs_prompt);
-        }
-        if !mcp_prompt.is_empty() {
-            sections.push(mcp_prompt);
-        }
-        let system_prompt = sections.join("\n\n---\n\n");
-        // Volatile tail — knowledge-base hits for *this* query.
-        let system_volatile = kb_prompt;
-        let images = if vision_ok { collect_images(&attached_docs) } else { Vec::new() };
+    if is_new_chat {
+        emit(&tx, &json!({ "type": "chat_id", "chatId": &chat_id })).await;
+    }
 
-        let mut messages = messages;
-        if !images.is_empty() {
-            // Attach the rendered page images to the *last* user message, which is
-            // the one the model is replying to. Falls through silently if there is
-            // no user message in the history.
-            if let Some(last_user) = messages.iter_mut().rev().find(|m| matches!(m.role, Role::User)) {
-                last_user.images = images.clone();
-            }
-        }
+    // Parallel loading. The library listing lets the model
+    // know which sources the user has even when semantic search
+    // doesn't surface them.
+    let (attached_docs, mcp_servers, kb_chunks, library_inventory, (locale, default_domain)) = tokio::join!(
+        load_attached_docs(&state, &user_id, &doc_ids, vision_ok, &pii_protected_ids, &tx),
+        discover_mcp_for_user(&state, &user_id),
+        retrieve_kb_chunks(&state, &user_id, &chat_id, &last_user_query, kb_top_k),
+        list_indexed_corpus_docs(&state, &user_id),
+        fetch_locale_and_default_domain(&state, &user_id),
+    );
+    drop(pii_protected_ids);
 
-        tracing::info!(
-            "[chat] stream_chat_root: chat_id={chat_id_clone}, model={raw_model}, vision_ok={vision_ok}, local_config_present={}, docs={}, mcp_servers={}, kb_chunks={} (sys_prompt={} chars cacheable + {} volatile, images={})",
-            local_config.is_some(),
-            attached_docs.len(),
-            mcp_servers.len(),
-            kb_chunks.len(),
-            system_prompt.len(),
-            system_volatile.len(),
-            images.len()
-        );
+    // The project domain takes precedence over the user's default one.
+    let domain = project_meta
+        .as_ref()
+        .map(|(_, d)| d.clone())
+        .or(default_domain)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "others".to_string());
 
-        // ─── Tools available to the model ────────────────────────────────
-        // Builtin Mike tools first (read_document, find_in_document,
-        // read_workflow, generate_docx stub, edit_document stub).
-        let mut all_tools: Vec<ToolSchema> = builtin_tools::schemas();
+    // Prefix stable across turns, sent as a cacheable block. The knowledge
+    // base passages change with every question and travel separately
+    // (`system_volatile`) so they don't invalidate the cache.
+    // Local Ollama models report their real window; cloud models use the
+    // catalogue or the name-based table.
+    let context_window = llm::context_window::resolve(
+        &raw_model,
+        local_config.as_ref(),
+        Some(state.model_catalogue.as_ref()),
+    )
+    .await;
 
-        // MCP tools: injected ONLY for models that handle large tool
-        // schemas reliably (see `llm::supports_mcp_tools` for the gate).
-        // Smaller local models keep the previous behaviour — the MCP
-        // servers stay visible via the system-prompt summary
-        // (`build_mcp_system_prompt`) but their tool schemas don't go
-        // into the schema list. The system prompt structure is unchanged
-        // either way; the only thing this gate decides is whether the
-        // model receives the additional `tools` schemas at the wire
-        // protocol level.
-        let mcp_tools_enabled = llm::supports_mcp_tools(&raw_model);
-        let mcp_tool_count: usize = mcp_servers
+    let prologue = crate::presets::system_prompt::assemble_prologue(&locale, &domain);
+    let base = crate::presets::system_prompt::base_instructions();
+    let inventory_block = prompts::build_library_inventory_prompt(&library_inventory);
+    let project_block = project_meta
+        .as_ref()
+        .map(|(name, d)| prompts::build_project_context_prompt(name, d))
+        .unwrap_or_default();
+    let project_docs_block = prompts::build_project_docs_prompt(doc_ids.len(), &project_documents);
+    let mcp_block = prompts::build_mcp_system_prompt(&mcp_servers);
+    let system_volatile = prompts::build_kb_system_prompt(&kb_chunks);
+    drop(library_inventory);
+
+    // Attachments get what the rest of the request leaves of 90% of the
+    // window. With a local model whose window the server has not reported
+    // yet they are sent whole: a guessed window would cut them needlessly,
+    // and an overflow error teaches the real value for the next turn.
+    let tools_tokens = llm::summarize::estimate_tokens(
+        &serde_json::to_string(&builtin_tools::schemas()).unwrap_or_default(),
+    );
+    let fixed_tokens = [&prologue, &base, &inventory_block, &project_block, &project_docs_block, &mcp_block, &system_volatile]
+        .iter()
+        .map(|s| llm::summarize::estimate_tokens(s))
+        .sum::<usize>()
+        + llm::summarize::estimate_messages_tokens(&messages)
+        + tools_tokens
+        + llm::summarize::REPLY_RESERVE_TOKENS;
+    let usable_window = context_window.tokens * 9 / 10;
+    let mut attached_docs = attached_docs;
+    let excerpted = if context_window.is_known() || !raw_model.starts_with("local:") {
+        attachment_budget::fit(
+            &mut attached_docs,
+            &last_user_query,
+            usable_window.saturating_sub(fixed_tokens),
+        )
+    } else {
+        Vec::new()
+    };
+
+    let system_prompt = [
+        prologue,
+        base,
+        inventory_block,
+        prompts::build_doc_system_prompt(&attached_docs),
+        project_block,
+        project_docs_block,
+        mcp_block,
+    ]
+    .into_iter()
+    .filter(|s| !s.is_empty())
+    .collect::<Vec<_>>()
+    .join(prompts::SECTION_SEPARATOR);
+
+    // Budget for each `read_document` result: half of what the prompt
+    // leaves, so a couple of reads fit; never below a useful minimum.
+    let read_budget_chars = {
+        let prompt_tokens = llm::summarize::estimate_tokens(&system_prompt)
+            + llm::summarize::estimate_tokens(&system_volatile)
+            + llm::summarize::estimate_messages_tokens(&messages)
+            + tools_tokens
+            + llm::summarize::REPLY_RESERVE_TOKENS;
+        (usable_window.saturating_sub(prompt_tokens) / 2 * 4).max(8_000)
+    };
+    let excerpt_note = (!excerpted.is_empty()).then(|| {
+        let items: Vec<(String, attachment_budget::ExcerptInfo)> = excerpted
             .iter()
-            .map(|s| s.tool_schemas.len())
-            .sum();
+            .filter_map(|&i| attached_docs[i].excerpt.map(|e| (attached_docs[i].filename.clone(), e)))
+            .collect();
+        prompts::attachments_excerpted_note(&locale, &items)
+    });
+
+    let attached_count = attached_docs.len();
+    let images: Vec<String> = if vision_ok {
+        attached_docs.into_iter().flat_map(|d| d.images).collect()
+    } else {
+        Vec::new()
+    };
+    let image_count = images.len();
+    let mut messages = messages;
+    if !images.is_empty()
+        && let Some(last_user) = messages.iter_mut().rev().find(|m| matches!(m.role, Role::User))
+    {
+        // Page images go on the message the model is replying to.
+        last_user.images = images;
+    }
+
+    tracing::info!(
+        "[chat] turn: chat_id={chat_id}, model={raw_model}, vision_ok={vision_ok}, local_config_present={}, docs={attached_count}, mcp_servers={}, kb_chunks={} (sys_prompt={} chars cacheable + {} volatile, images={image_count})",
+        local_config.is_some(),
+        mcp_servers.len(),
+        kb_chunks.len(),
+        system_prompt.len(),
+        system_volatile.len(),
+    );
+
+    // Tools: built-in ones first, then MCP ones only for models
+    // that handle many schemas well (`llm::supports_mcp_tools`).
+    let mut all_tools: Vec<ToolSchema> = builtin_tools::schemas();
+    let mcp_tools_enabled = llm::supports_mcp_tools(&raw_model);
+    let mcp_tool_count: usize = mcp_servers.iter().map(|s| s.tool_schemas.len()).sum();
+    if mcp_tools_enabled {
+        all_tools.reserve(mcp_tool_count);
+        for srv in &mcp_servers {
+            all_tools.extend(srv.tool_schemas.iter().cloned());
+        }
+    }
+
+    // doc-N labels (from 1) → UUID: attachments first, then project
+    // documents, as in the prompt blocks.
+    // Grows during the tool loop: a document generated mid-turn gets the
+    // next label, so the model can cite it and the citation resolver can
+    // trace it back to a real row.
+    let mut doc_label_map: HashMap<String, String> = doc_ids
+        .iter()
+        .chain(project_documents.iter().map(|(id, _)| id))
+        .enumerate()
+        .map(|(i, id)| (format!("doc-{}", i + 1), id.clone()))
+        .collect();
+    drop(project_documents);
+
+    tracing::info!(
+        "[chat] tool-use: {} total tools (builtin + {mcp_tool_count} MCP, mcp_enabled={mcp_tools_enabled}), labels={}",
+        all_tools.len(),
+        doc_label_map.len()
+    );
+    if mcp_tool_count > 0 {
         if mcp_tools_enabled {
-            for srv in &mcp_servers {
-                all_tools.extend(srv.tool_schemas.iter().cloned());
-            }
-        }
-
-        // Map chat-local labels (`doc-1`, `doc-2`, …) to real document UUIDs so
-        // builtin tools (read_document, find_in_document) can resolve them.
-        // 1-indexed (see build_doc_system_prompt above for the off-by-one
-        // story that motivated the switch).
-        let mut doc_label_map: HashMap<String, String> = HashMap::new();
-        for (idx, doc_id) in doc_ids.iter().enumerate() {
-            doc_label_map.insert(format!("doc-{}", idx + 1), doc_id.clone());
-        }
-        // Project documents continue the label sequence after the inline
-        // attachments so read_document / find_in_document resolve them too.
-        for (i, (id, _)) in project_documents.iter().enumerate() {
-            doc_label_map.insert(format!("doc-{}", doc_ids.len() + i + 1), id.clone());
-        }
-
-        tracing::info!(
-            "[chat] tool-use: {} total tools (builtin + {} MCP, mcp_enabled={}), labels={:?}",
-            all_tools.len(),
-            mcp_tool_count,
-            mcp_tools_enabled,
-            doc_label_map.keys().collect::<Vec<_>>()
-        );
-        // Verbose dump of the MCP tool names actually being shipped in the
-        // request — invaluable when a user reports "the model never calls
-        // my MCP tool". If this log shows the tool name, the schema is on
-        // the wire; if not, either the gate dropped it (model-not-supported)
-        // or discovery never returned it (server-side handshake failure).
-        if mcp_tools_enabled && mcp_tool_count > 0 {
-            let mcp_tool_names: Vec<&str> = mcp_servers
+            let names: Vec<&str> = mcp_servers
                 .iter()
                 .flat_map(|s| s.tool_schemas.iter().map(|t| t.function.name.as_str()))
                 .collect();
+            tracing::info!("[chat] MCP tools shipped to model: {names:?}");
+        } else {
+            let servers: Vec<&str> = mcp_servers.iter().map(|s| s.config_name.as_str()).collect();
             tracing::info!(
-                "[chat] MCP tools shipped to model: {:?}",
-                mcp_tool_names
-            );
-        } else if mcp_tool_count > 0 {
-            let server_names: Vec<&str> = mcp_servers
-                .iter()
-                .map(|s| s.config_name.as_str())
-                .collect();
-            tracing::info!(
-                "[chat] MCP servers discovered ({} tools total) but NOT shipped — model {:?} not in supports_mcp_tools allowlist. Servers: {:?}. Set MRUST_FORCE_MCP_TOOLS=1 to override.",
-                mcp_tool_count,
-                raw_model,
-                server_names
+                "[chat] MCP servers discovered ({mcp_tool_count} tools total) but NOT shipped — model {raw_model:?} not in supports_mcp_tools allowlist. Servers: {servers:?}. Set COVE_FORCE_MCP_TOOLS=1 to override."
             );
         }
+    }
 
-        let claude_key = user_settings.as_ref().and_then(|s| s.claude_api_key.clone());
-        let gemini_key = user_settings.as_ref().and_then(|s| s.gemini_api_key.clone());
-        let gemini_region = user_settings.as_ref().and_then(|s| s.gemini_region.clone());
+    let claude_key = user_settings.as_ref().and_then(|s| s.claude_api_key.clone());
+    let gemini_key = user_settings.as_ref().and_then(|s| s.gemini_api_key.clone());
+    let gemini_region = user_settings.as_ref().and_then(|s| s.gemini_region.clone());
+    let mistral_opts = build_mistral_opts(&raw_model, user_settings.as_ref());
 
-        // Compress older turns once the whole prompt — system prefix
-        // (instructions + attached-document text), the volatile KB block and
-        // the conversation history — fills past 80% of the model's context
-        // window. The system prefix is measured here and passed in, because
-        // in a document-heavy chat it dwarfs the turns and a history-only
-        // trigger would never fire. Failing-open: if the summarizer LLM call
-        // errors, the original messages are returned unchanged.
-        let summarizer_creds = llm::summarize::SummarizerCreds {
+    // Compress the oldest turns beyond 80% of the context window,
+    // counting the system prompt too. If summarisation fails
+    // the messages stay unchanged.
+    let summarizer_creds = llm::summarize::SummarizerCreds {
+        local_config: local_config.clone(),
+        claude_api_key: claude_key.clone(),
+        gemini_api_key: gemini_key.clone(),
+        gemini_region: gemini_region.clone(),
+    };
+    let system_overhead = llm::summarize::estimate_tokens(&system_prompt)
+        + llm::summarize::estimate_tokens(&system_volatile);
+    let mut current_messages = llm::summarize::maybe_compress_history(
+        messages,
+        &raw_model,
+        &summarizer_creds,
+        system_overhead,
+        context_window.tokens,
+    )
+    .await;
+    drop(summarizer_creds);
+
+    let mut full_response = String::new();
+    if let Some(note) = &excerpt_note {
+        emit_visible_text(&tx, &mut full_response, note).await;
+    }
+
+    // Compression only shortens the history: attached documents in the
+    // system prompt can still overflow a small window. Warn before sending
+    // when the window is known from the server.
+    let estimated_tokens = system_overhead
+        + llm::summarize::estimate_messages_tokens(&current_messages)
+        + llm::summarize::REPLY_RESERVE_TOKENS;
+    if context_window.is_known() && estimated_tokens > context_window.tokens {
+        tracing::warn!(
+            "[chat] estimated request ≈{estimated_tokens} tokens exceeds the {} token window of {raw_model}",
+            context_window.tokens
+        );
+        let note = prompts::context_overflow_note(&locale, estimated_tokens, context_window.tokens);
+        emit_visible_text(&tx, &mut full_response, &note).await;
+    }
+
+    // Events to store with the message (today `doc_created`, for the download
+    // card on reopen), in the same shape sent while streaming.
+    let mut persistent_events: Vec<Value> = Vec::new();
+    // Documents that already got a download card this turn.
+    let mut carded_documents: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut empty_answer_retries: u32 = 0;
+    let mut iteration: u32 = 0;
+    let mut errored = false;
+
+    // Some models reject the `tools` parameter: this is found out on the first
+    // call and remembered in AppState so the attempt isn't repeated.
+    let already_known_unsupported = state.no_tools_models.read().await.contains(&raw_model);
+    let mut tools_supported = !all_tools.is_empty() && !already_known_unsupported;
+    let mut tool_warning_emitted = false;
+    if !all_tools.is_empty() && already_known_unsupported {
+        let warning = prompts::unsupported_tools_warning(&locale, &raw_model, mcp_servers.len());
+        emit_visible_text(&tx, &mut full_response, &warning).await;
+        tool_warning_emitted = true;
+    }
+
+    loop {
+        iteration += 1;
+        let params = StreamParams {
+            model: raw_model.clone(),
+            system_prompt: system_prompt.clone(),
+            system_volatile: system_volatile.clone(),
+            messages: current_messages.clone(),
+            tools: if tools_supported { all_tools.clone() } else { vec![] },
+            max_iterations: 1,
+            enable_thinking: false,
             local_config: local_config.clone(),
             claude_api_key: claude_key.clone(),
             gemini_api_key: gemini_key.clone(),
             gemini_region: gemini_region.clone(),
+            // Used by Mistral for a stable prompt_cache_key.
+            chat_id: Some(chat_id.clone()),
+            mistral_opts: mistral_opts.clone(),
         };
-        let system_overhead = llm::summarize::estimate_tokens(&system_prompt)
-            + llm::summarize::estimate_tokens(&system_volatile);
-        let messages = llm::summarize::maybe_compress_history(
-            messages,
-            &raw_model,
-            &summarizer_creds,
-            system_overhead,
-        )
-        .await;
 
-        // Move retrieved KB chunks into the post-stream citation parser
-        // so model-emitted [g1]/[p1] tags can be mapped back to the
-        // source path + chunk index.
-        let kb_chunks_for_citations = kb_chunks.clone();
-
-        // Bumped from 5 in v0.3.2 after a user hit the cap on a
-        // medical-anamnesis workflow with 10 attached PDFs: the model
-        // legitimately needs to `read_document` (or `find_in_document`)
-        // several times to compile a multi-source summary, and each
-        // tool call burns one iteration. 5 was an early-debug ceiling
-        // tuned against single-doc reviews; 20 covers ten-doc-anamnesis
-        // / due-diligence-document-pack flows while still bounding a
-        // truly stuck loop (per-iteration cost is one LLM round-trip,
-        // so 20 caps a runaway at ~20× the per-turn latency budget).
-        const MAX_TOOL_ITERATIONS: u32 = 20;
-        // How many times to nudge the model when it ends a turn with a
-        // completely empty answer (no text, no tool call) — a flaky
-        // behaviour seen mostly with Gemini right after a tool result.
-        const MAX_EMPTY_ANSWER_RETRIES: u32 = 2;
-        let mut empty_answer_retries: u32 = 0;
-        let mut full_response = String::new();
-        // Per-message persistent events. Today this collects the
-        // `doc_created` envelopes so reopening the chat re-shows the
-        // download card; the stored shape mirrors what the live SSE
-        // stream sends so the frontend renders identically in both
-        // paths. Other event types (tool_call_start, citations, …) are
-        // streaming-only and deliberately not persisted.
-        let mut persistent_events: Vec<Value> = Vec::new();
-        let mut current_messages = messages;
-        let mut iteration: u32 = 0;
-        let mut errored = false;
-        // Some models (e.g. gemma3 on Ollama) refuse the `tools` parameter
-        // entirely. We detect that on the first call and disable tool-use
-        // for the rest of the conversation, falling back to the system-prompt
-        // listing (the model still "knows" the servers exist, just can't call them).
-        // Persisted in AppState so we don't pay the retry on every message.
-        let already_known_unsupported = state_clone
-            .no_tools_models
-            .read()
-            .await
-            .contains(&raw_model);
-        let mut tools_supported = !all_tools.is_empty() && !already_known_unsupported;
-
-        // If we already know this model does not support tools but there ARE
-        // MCP servers configured, prepend an explicit warning to the response
-        // so the user sees it in chat (not just in the backend log).
-        let mut tool_warning_emitted = false;
-        if !all_tools.is_empty() && already_known_unsupported {
-            let warning = format!(
-                "> ⚠️ **Tool-use non supportato dal modello selezionato** (`{}`). I {} \
-                 server MCP configurati sono visibili nel mio contesto, ma non posso \
-                 invocare direttamente i loro tools. Per il tool-use reale usa un \
-                 modello compatibile: Claude, Gemini, GPT-4o, Qwen 2.5, Llama 3.1+, \
-                 Mistral Small.\n\n---\n\n",
-                raw_model,
-                mcp_servers.len()
-            );
-            full_response.push_str(&warning);
-            let payload = json!({ "type": "content_delta", "text": warning });
-            let _ = tx.send(Ok(Event::default().data(payload.to_string()))).await;
-            tool_warning_emitted = true;
-        }
-
-        loop {
-            iteration += 1;
-            let params = StreamParams {
-                model: raw_model.clone(),
-                system_prompt: system_prompt.clone(),
-                system_volatile: system_volatile.clone(),
-                messages: current_messages.clone(),
-                tools: if tools_supported { all_tools.clone() } else { vec![] },
-                max_iterations: 1,
-                enable_thinking: false,
-                local_config: local_config.clone(),
-                claude_api_key: claude_key.clone(),
-                gemini_api_key: gemini_key.clone(),
-                gemini_region: gemini_region.clone(),
-                // Used by the Mistral provider to derive a stable
-                // prompt_cache_key. Other providers ignore this field.
-                chat_id: Some(chat_id_clone.clone()),
-                // Read per-user Mistral options (safe_prompt /
-                // parallel_tool_calls) from settings. None for any
-                // non-mistral routing.
-                mistral_opts: build_mistral_opts(&raw_model, user_settings.as_ref()),
-            };
-
-            let stream = llm::stream_chat(params).await;
-            match stream {
-                Err(e) => {
-                    let msg = e.to_string();
-                    // Be precise: only treat as "model can't do tools" if the
-                    // upstream explicitly says so. A generic 400 with "tool"
-                    // in the body usually means a malformed schema, not a
-                    // model limitation — surfacing the error is more useful.
-                    let lower = msg.to_lowercase();
-                    let unsupported = lower.contains("does not support tools")
-                        || lower.contains("tools not supported")
-                        || lower.contains("does not support tool use")
-                        || lower.contains("tool use is not supported")
-                        || lower.contains("functioncalling is not supported")
-                        || lower.contains("function calling is not supported");
-                    if tools_supported && unsupported {
-                        tracing::warn!(
-                            "[chat] model {raw_model}: tools rejected — \
-                             retrying without tool-use. Original error: {}",
-                            msg.chars().take(500).collect::<String>()
-                        );
-                        state_clone
-                            .no_tools_models
-                            .write()
-                            .await
-                            .insert(raw_model.clone());
-                        tools_supported = false;
-                        if !tool_warning_emitted && !all_tools.is_empty() {
-                            let warning = format!(
-                                "> ⚠️ **Tool-use non supportato dal modello selezionato** (`{}`). I {} \
-                                 server MCP configurati sono visibili nel mio contesto, ma non posso \
-                                 invocare direttamente i loro tools. Per il tool-use reale usa un \
-                                 modello compatibile: Claude, Gemini, GPT-4o, Qwen 2.5, Llama 3.1+, \
-                                 Mistral Small.\n\n---\n\n",
-                                raw_model,
-                                mcp_servers.len()
-                            );
-                            full_response.push_str(&warning);
-                            let payload = json!({ "type": "content_delta", "text": warning });
-                            let _ = tx.send(Ok(Event::default().data(payload.to_string()))).await;
-                            tool_warning_emitted = true;
-                        }
-                        iteration -= 1; // don't count this as a real iteration
-                        continue;
+        let mut stream = match llm::stream_chat(params).await {
+            Ok(s) => s,
+            Err(e) => {
+                let msg = e.to_string();
+                // Only an explicit tool rejection disables
+                // tool use; a generic 400 is almost always a malformed schema.
+                let lower = msg.to_lowercase();
+                let unsupported = [
+                    "does not support tools",
+                    "tools not supported",
+                    "does not support tool use",
+                    "tool use is not supported",
+                    "functioncalling is not supported",
+                    "function calling is not supported",
+                ]
+                .iter()
+                .any(|needle| lower.contains(needle));
+                if tools_supported && unsupported {
+                    tracing::warn!(
+                        "[chat] model {raw_model}: tools rejected — retrying without tool-use. Original error: {}",
+                        msg.chars().take(500).collect::<String>()
+                    );
+                    state.no_tools_models.write().await.insert(raw_model.clone());
+                    tools_supported = false;
+                    if !tool_warning_emitted {
+                        let warning = prompts::unsupported_tools_warning(&locale, &raw_model, mcp_servers.len());
+                        emit_visible_text(&tx, &mut full_response, &warning).await;
+                        tool_warning_emitted = true;
                     }
-                    tracing::error!("[chat] stream_chat error (iter {iteration}): {e}");
-                    let payload = json!({ "type": "error", "message": e.to_string() });
-                    let _ = tx.send(Ok(Event::default().data(payload.to_string()))).await;
-                    errored = true;
+                    iteration -= 1;
+                    continue;
+                }
+                tracing::error!("[chat] stream_chat error (iter {iteration}): {msg}");
+                // A context-overflow error carries the server's real window:
+                // remember it so the next turn plans with it.
+                if let Some(window) =
+                    llm::context_window::learn_from_error(&raw_model, local_config.as_ref(), &msg)
+                {
+                    let note = prompts::context_window_learnt_note(&locale, window);
+                    emit_visible_text(&tx, &mut full_response, &note).await;
+                }
+                emit(&tx, &json!({ "type": "error", "message": msg })).await;
+                errored = true;
+                break;
+            }
+        };
+
+        let mut iter_text = String::new();
+        let mut iter_tool_calls: Vec<ToolCall> = Vec::new();
+        let mut got_done = false;
+        let mut got_err: Option<String> = None;
+        while let Some(event) = stream.next().await {
+            match event {
+                Ok(StreamEvent::ContentDelta(text)) => {
+                    iter_text.push_str(&text);
+                    full_response.push_str(&text);
+                    if !emit(&tx, &json!({ "type": "content_delta", "text": text })).await {
+                        break;
+                    }
+                }
+                // Accumulate: Gemini sends parallel calls in separate chunks,
+                // each with its own thoughtSignature, and they must all be
+                // returned on the next turn.
+                Ok(StreamEvent::ToolCalls(calls)) => iter_tool_calls.extend(calls),
+                // The model's reasoning has its own event and doesn't
+                // go into the reply.
+                Ok(StreamEvent::ReasoningDelta(text)) => {
+                    if !emit(&tx, &json!({ "type": "reasoning_delta", "text": text })).await {
+                        break;
+                    }
+                }
+                Ok(StreamEvent::ReasoningEnd) => {
+                    emit(&tx, &json!({ "type": "reasoning_done" })).await;
+                }
+                Ok(StreamEvent::Done) => {
+                    got_done = true;
                     break;
                 }
-                Ok(mut s) => {
-                    let mut iter_text = String::new();
-                    let mut iter_tool_calls: Vec<ToolCall> = Vec::new();
-                    let mut got_done = false;
-                    let mut got_err: Option<String> = None;
-                    while let Some(event) = s.next().await {
-                        match event {
-                            Ok(StreamEvent::ContentDelta(text)) => {
-                                iter_text.push_str(&text);
-                                full_response.push_str(&text);
-                                let payload = json!({ "type": "content_delta", "text": text });
-                                if tx
-                                    .send(Ok(Event::default().data(payload.to_string())))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            Ok(StreamEvent::ToolCalls(calls)) => {
-                                // ACCUMULATE across multiple SSE chunks. Gemini 3.5
-                                // streams parallel function calls in separate SSE
-                                // chunks (one functionCall per chunk), each carrying
-                                // its own thoughtSignature. The previous `=` replaced
-                                // the vec on every chunk, dropping all but the last
-                                // call. The next iteration's request to Gemini then
-                                // failed with 400 INVALID_ARGUMENT — the model's
-                                // internal state knew it had emitted N calls, but
-                                // we'd only echoed back the last one, so positions
-                                // 0..N-1 looked like they were "missing
-                                // thought_signature". `extend` is also correct for
-                                // providers that bundle all calls into a single
-                                // event (Claude, OpenAI batch): a single extend of
-                                // [c1,…,cN] gives the same result as the prior
-                                // single assignment.
-                                iter_tool_calls.extend(calls);
-                            }
-                            // Model reasoning / "thinking" — forwarded as
-                            // its own SSE event so the UI can show it in a
-                            // separate collapsible block rather than mixing
-                            // it into the answer text. Not appended to
-                            // `full_response` (it is not the answer).
-                            Ok(StreamEvent::ReasoningDelta(text)) => {
-                                let payload = json!({
-                                    "type": "reasoning_delta", "text": text
-                                });
-                                if tx
-                                    .send(Ok(Event::default().data(payload.to_string())))
-                                    .await
-                                    .is_err()
-                                {
-                                    break;
-                                }
-                            }
-                            Ok(StreamEvent::ReasoningEnd) => {
-                                let payload = json!({ "type": "reasoning_done" });
-                                let _ = tx
-                                    .send(Ok(Event::default().data(payload.to_string())))
-                                    .await;
-                            }
-                            Ok(StreamEvent::Done) => { got_done = true; break; }
-                            Err(e) => { got_err = Some(e.to_string()); break; }
-                            _ => {}
-                        }
-                    }
-                    tracing::info!(
-                        "[chat] iter {iteration}: text={}, tool_calls={}, done={}, err={:?}",
-                        iter_text.len(),
-                        iter_tool_calls.len(),
-                        got_done,
-                        got_err
-                    );
-
-                    if iter_tool_calls.is_empty() {
-                        // Empty final turn — no text and no further tool
-                        // call. Seen mostly with Gemini right after a
-                        // tool result (e.g. read_workflow), and it leaves
-                        // the user with a blank reply. Nudge the model to
-                        // actually produce its answer before giving up.
-                        if iter_text.trim().is_empty()
-                            && full_response.trim().is_empty()
-                            && empty_answer_retries < MAX_EMPTY_ANSWER_RETRIES
-                        {
-                            empty_answer_retries += 1;
-                            tracing::warn!(
-                                "[chat] empty answer at iter {iteration}; \
-                                 nudging model (retry {empty_answer_retries}/{MAX_EMPTY_ANSWER_RETRIES})"
-                            );
-                            current_messages.push(Message::user(
-                                "Non hai prodotto alcuna risposta. Completa \
-                                 ora la richiesta seguendo le istruzioni \
-                                 date: se ti serve il contenuto di un \
-                                 documento caricalo con read_document, poi \
-                                 fornisci direttamente l'output richiesto.",
-                            ));
-                            continue;
-                        }
-                        // No more tools requested → final answer reached.
-                        if full_response.trim().is_empty() && !errored {
-                            // Retries exhausted (or none warranted) and
-                            // still nothing: surface a visible note so the
-                            // turn doesn't render as an empty bubble.
-                            let note = "_(Il modello non ha prodotto una \
-                                        risposta. Riprova a inviare il \
-                                        messaggio.)_";
-                            full_response.push_str(note);
-                            let payload =
-                                json!({ "type": "content_delta", "text": note });
-                            let _ = tx
-                                .send(Ok(Event::default().data(payload.to_string())))
-                                .await;
-                        }
-                        break;
-                    }
-                    if iteration >= MAX_TOOL_ITERATIONS {
-                        tracing::warn!("[chat] hit MAX_TOOL_ITERATIONS, stopping");
-                        let payload = json!({
-                            "type": "content_delta",
-                            "text": "\n\n_(stopped: too many tool iterations)_"
-                        });
-                        let _ = tx.send(Ok(Event::default().data(payload.to_string()))).await;
-                        break;
-                    }
-
-                    // The model produced at least one tool call — proof of
-                    // life. Reset the empty-answer retry counter so a future
-                    // stall (e.g. blank turn AFTER a tool result later in
-                    // the conversation) gets its own fresh nudges instead
-                    // of inheriting a budget already burned earlier.
-                    empty_answer_retries = 0;
-
-                    // Replay the assistant's tool_calls in the next round, then
-                    // dispatch each call and append its result as a `tool` message.
-                    current_messages.push(Message::assistant_tool_calls(iter_tool_calls.clone()));
-                    for call in &iter_tool_calls {
-                        let payload = json!({ "type": "tool_call_start", "name": call.name });
-                        let _ = tx.send(Ok(Event::default().data(payload.to_string()))).await;
-
-                        // Race the dispatch against a 5-s ticker that
-                        // emits `tool_call_progress` SSE events to the
-                        // browser. Without this, slow MCP tools (e.g.
-                        // Edge's pseudonymise-with-human-approval flow
-                        // that can hold the connection for minutes
-                        // while a user clicks Conferma in the Edge UI)
-                        // looked silent in the chat — the user thought
-                        // Mike had died. Now the chat shows
-                        // "Sto eseguendo X (37s)…" so the wait is
-                        // visibly progressing.
-                        let dispatch_start_ts = std::time::Instant::now();
-                        let tool_name_for_progress = call.name.clone();
-                        let tx_progress = tx.clone();
-                        let progress_task = tokio::spawn(async move {
-                            // First tick at 5 s, then every 5 s after.
-                            let mut ticker = tokio::time::interval(
-                                std::time::Duration::from_secs(5),
-                            );
-                            // Skip the immediate first tick that
-                            // tokio::interval fires.
-                            ticker.tick().await;
-                            loop {
-                                ticker.tick().await;
-                                let elapsed_secs =
-                                    dispatch_start_ts.elapsed().as_secs();
-                                let payload = json!({
-                                    "type": "tool_call_progress",
-                                    "name": tool_name_for_progress,
-                                    "elapsed_secs": elapsed_secs,
-                                });
-                                if tx_progress
-                                    .send(Ok(Event::default()
-                                        .data(payload.to_string())))
-                                    .await
-                                    .is_err()
-                                {
-                                    // Receiver gone — stop ticking.
-                                    return;
-                                }
-                            }
-                        });
-
-                        let result = if builtin_tools::is_builtin(&call.name) {
-                            tracing::info!("[chat] dispatching builtin tool: {}", call.name);
-                            builtin_tools::dispatch(
-                                &state_clone,
-                                &auth.user_id,
-                                Some(&chat_id_clone),
-                                &doc_label_map,
-                                &call.name,
-                                &call.input,
-                            )
-                            .await
-                        } else {
-                            tracing::info!("[chat] dispatching MCP tool: {}", call.name);
-                            // Goes through the auto-chain wrapper so
-                            // `request_*` calls that return a pending
-                            // session_id automatically follow up with
-                            // `get_*` instead of returning the pending
-                            // envelope to the model.
-                            dispatch_mcp_tool_with_async_chain(
-                                &mcp_servers,
-                                &call.name,
-                                &call.input,
-                            )
-                            .await
-                        };
-                        progress_task.abort();
-                        // Tell the UI this tool finished, so its
-                        // "running…" line resolves to a check right away.
-                        // Without it the step stays spinning until the
-                        // *next* tool starts — and on a docx generation
-                        // that gap is the whole body-writing phase, so it
-                        // looked stuck on `describe_docx_template`.
-                        let _ = tx
-                            .send(Ok(Event::default().data(
-                                json!({
-                                    "type": "tool_call_done",
-                                    "name": call.name,
-                                })
-                                .to_string(),
-                            )))
-                            .await;
-                        // For diagnostics: when a tool result is short
-                        // it's almost always an error envelope or a
-                        // pointer to async work. Log the body verbatim
-                        // so we can tell at a glance whether the model
-                        // is going to refuse vs proceed.
-                        if result.len() <= 200 {
-                            tracing::info!(
-                                "[chat] tool {} result ({} chars): {}",
-                                call.name,
-                                result.len(),
-                                result
-                            );
-                        } else {
-                            tracing::info!(
-                                "[chat] tool {} result: {} chars",
-                                call.name,
-                                result.len()
-                            );
-                        }
-                        // Typed step events for the document / workflow
-                        // builtin tools. Name-based (not shape-based):
-                        // read_document also returns {doc_id,filename,…},
-                        // so a shape match used to mis-fire a bogus
-                        // download card for a plain read.
-                        //   generate_docx    → doc_created (download card,
-                        //                      persisted so it survives reload)
-                        //   generate_xlsx    → doc_created (same card)
-                        //   read_document    → doc_read
-                        //   find_in_document → doc_find
-                        //   read_workflow    → workflow_applied
-                        // A future generator (pdf-export, …) adds its
-                        // own arm here.
-                        if let Ok(rv) = serde_json::from_str::<Value>(&result)
-                            && rv.get("error").is_none()
-                        {
-                            let s = |k: &str| {
-                                rv.get(k).and_then(|v| v.as_str()).unwrap_or("")
-                            };
-                            match call.name.as_str() {
-                                "generate_docx" | "generate_xlsx" => {
-                                    let doc_id = s("doc_id");
-                                    let filename = s("filename");
-                                    if !doc_id.is_empty() && !filename.is_empty() {
-                                        let ev = json!({
-                                            "type": "doc_created",
-                                            "filename": filename,
-                                            "download_url": format!("/document/{doc_id}/download"),
-                                            "document_id": doc_id,
-                                        });
-                                        let _ = tx
-                                            .send(Ok(Event::default().data(ev.to_string())))
-                                            .await;
-                                        // Persisted so the download card
-                                        // re-renders when the chat reopens.
-                                        persistent_events.push(json!({
-                                            "type": "doc_created",
-                                            "filename": filename,
-                                            "download_url": format!("/document/{doc_id}/download"),
-                                            "document_id": doc_id,
-                                            "isStreaming": false,
-                                        }));
-                                    }
-                                }
-                                "read_document" => {
-                                    let ev = json!({
-                                        "type": "doc_read",
-                                        "doc_id": s("doc_id"),
-                                        "filename": s("filename"),
-                                    });
-                                    let _ = tx
-                                        .send(Ok(Event::default().data(ev.to_string())))
-                                        .await;
-                                }
-                                "find_in_document" => {
-                                    let ev = json!({
-                                        "type": "doc_find",
-                                        "doc_id": s("doc_id"),
-                                        "filename": s("filename"),
-                                        "query": s("query"),
-                                        "match_count": rv.get("match_count")
-                                            .and_then(|v| v.as_u64())
-                                            .unwrap_or(0),
-                                    });
-                                    let _ = tx
-                                        .send(Ok(Event::default().data(ev.to_string())))
-                                        .await;
-                                }
-                                "read_workflow" => {
-                                    let ev = json!({
-                                        "type": "workflow_applied",
-                                        "workflow_id": s("workflow_id"),
-                                        "title": s("title"),
-                                    });
-                                    let _ = tx
-                                        .send(Ok(Event::default().data(ev.to_string())))
-                                        .await;
-                                }
-                                _ => {}
-                            }
-                        }
-                        current_messages.push(Message::tool_result(&call.id, &call.name, &result));
-                    }
+                Err(e) => {
+                    got_err = Some(e.to_string());
+                    break;
                 }
+                _ => {}
             }
         }
-
-        let got_done = !errored;
-        let got_error: Option<String> = if errored { Some("see backend log".into()) } else { None };
+        drop(stream);
         tracing::info!(
-            "[chat] stream finished: chars={}, done={}, error={:?}",
-            full_response.len(),
-            got_done,
-            got_error
+            "[chat] iter {iteration}: text={}, tool_calls={}, done={got_done}, err={got_err:?}",
+            iter_text.len(),
+            iter_tool_calls.len(),
         );
 
-        // Model-independent normalisation: decompose hybrid citation
-        // brackets like `[c1, c2, FILE.pdf, p.4, doc-7]` that the model
-        // sometimes concatenates when answering with many sources.
-        // The frontend's MARKER_GROUP regex requires every token inside
-        // a `[...]` to match `[gcp]\d+`, so a hybrid bracket fails the
-        // match entirely and drags otherwise-valid `cN` refs into plain
-        // text alongside the filename. Splitting them upstream — before
-        // both the <CITATIONS>-block parser and the [doc-id: …]
-        // rewriter — restores pill rendering regardless of provider.
-        // See `feedback_model_independent_normalization.md` for the
-        // architectural principle.
-        let pre_split_len = full_response.len();
-        let split_response = split_hybrid_citation_brackets(&full_response);
-        if matches!(&split_response, std::borrow::Cow::Owned(_)) {
-            full_response = split_response.into_owned();
-            tracing::info!(
-                "[chat] hybrid-citation-bracket splitter rewrote response: \
-                 {pre_split_len} → {} chars",
-                full_response.len()
-            );
-            // Replace the live view so the user sees clean pills
-            // immediately on this turn (not only after a chat reload).
-            let payload = json!({
-                "type": "content_replace",
-                "text": full_response.clone(),
-            });
-            let _ = tx.send(Ok(Event::default().data(payload.to_string()))).await;
+        if iter_tool_calls.is_empty() {
+            if iter_text.trim().is_empty()
+                && full_response.trim().is_empty()
+                && empty_answer_retries < MAX_EMPTY_ANSWER_RETRIES
+            {
+                empty_answer_retries += 1;
+                tracing::warn!(
+                    "[chat] empty answer at iter {iteration}; nudging model (retry {empty_answer_retries}/{MAX_EMPTY_ANSWER_RETRIES})"
+                );
+                current_messages.push(Message::user(prompts::EMPTY_ANSWER_NUDGE));
+                continue;
+            }
+            if full_response.trim().is_empty() {
+                emit_visible_text(&tx, &mut full_response, prompts::empty_answer_note(&locale)).await;
+            }
+            break;
         }
-
-        // Diagnostic dump (v0.5.2+): before we decide how to resolve
-        // citations, log the final response shape so a "0 citations"
-        // SSE event has an explanation in the backend log. Cheap —
-        // a few lookups + char-window slicing.
-        {
-            let has_citations_marker = full_response
-                .to_ascii_lowercase()
-                .contains("<citations>");
-            let has_closing_marker = full_response
-                .to_ascii_lowercase()
-                .contains("</citations>");
-            let bracket_count = full_response.matches('[').count();
-            let len = full_response.chars().count();
-            let tail = full_response
-                .char_indices()
-                .rev()
-                .nth(800)
-                .map(|(i, _)| &full_response[i..])
-                .unwrap_or(full_response.as_str());
-            tracing::info!(
-                "[chat][cite-diag] final response: {len} chars, {bracket_count} '[' total, \
-                 <CITATIONS>={has_citations_marker}, </CITATIONS>={has_closing_marker}"
-            );
-            tracing::info!("[chat][cite-diag] tail (last 800 chars):\n{tail}");
+        if iteration >= MAX_TOOL_ITERATIONS {
+            tracing::warn!("[chat] hit MAX_TOOL_ITERATIONS, stopping");
+            emit(&tx, &json!({ "type": "content_delta", "text": prompts::tool_loop_limit_note(&locale) })).await;
+            break;
         }
+        // A tool call proves the model is active: the
+        // empty-reply nudges start again from zero.
+        empty_answer_retries = 0;
 
-        // Rewrite free-form `[doc-id: <handle>, page <N>]` references the
-        // model occasionally writes (ignoring the `[cN]` + <CITATIONS>
-        // contract — observed routinely on verbose generate_docx
-        // descriptions) into the canonical `[cN]` markers and synthesize
-        // the matching citations array. Done BEFORE persistence so the
-        // stored body has the right markers and pills render on reload
-        // too, and a `content_replace` SSE event swaps the live view.
-        let mut prebuilt_citations: Option<Value> = None;
-        if extract_citations_block(&full_response).is_none() {
-            let inline_refs = extract_inline_docid_refs(&full_response);
-            if !inline_refs.is_empty() {
-                // Collect every distinct handle, resolve doc-N labels
-                // locally, and validate raw UUIDs against the user's
-                // documents in one batch query.
-                let mut handles: Vec<String> =
-                    inline_refs.iter().map(|r| r.handle.clone()).collect();
-                handles.sort();
-                handles.dedup();
-                let mut uuids_to_validate: Vec<String> = Vec::new();
-                for h in &handles {
-                    if let Some(uuid) = doc_label_map.get(h) {
-                        uuids_to_validate.push(uuid.clone());
-                    } else if h.len() == 36
-                        && h.chars().filter(|c| *c == '-').count() == 4
-                    {
-                        uuids_to_validate.push(h.clone());
-                    }
-                }
-                uuids_to_validate.sort();
-                uuids_to_validate.dedup();
-                let mut filename_by_uuid: HashMap<String, String> = HashMap::new();
-                if !uuids_to_validate.is_empty() {
-                    let placeholders = std::iter::repeat("?")
-                        .take(uuids_to_validate.len())
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    let q = format!(
-                        "SELECT id, filename FROM documents \
-                         WHERE user_id = ? AND id IN ({})",
-                        placeholders
-                    );
-                    let mut query = sqlx::query_as::<_, (String, String)>(&q)
-                        .bind(&auth.user_id);
-                    for u in &uuids_to_validate {
-                        query = query.bind(u);
-                    }
-                    if let Ok(rows) = query.fetch_all(&state_clone.db).await {
-                        for (id, fname) in rows {
-                            filename_by_uuid.insert(id, fname);
-                        }
-                    }
-                }
-                // Reverse map filename → UUID so an inline
-                // `[doc-id: CARTELLA_TEST_010.pdf, page 3]` (the
-                // model lifted a filename from the inventory rather
-                // than the canonical `doc-N` handle) still resolves
-                // to the right document instead of producing a dead
-                // citation marker. Mirrors the same fallback applied
-                // in the trailing-CITATIONS-block resolver below.
-                let filename_to_uuid: HashMap<String, String> = filename_by_uuid
-                    .iter()
-                    .map(|(uuid, fname)| (fname.clone(), uuid.clone()))
-                    .collect();
-                let mut handle_to_doc: HashMap<String, (String, String)> = HashMap::new();
-                for h in &handles {
-                    let real_uuid = doc_label_map
-                        .get(h)
-                        .cloned()
-                        .or_else(|| filename_to_uuid.get(h).cloned())
-                        .unwrap_or_else(|| h.clone());
-                    if let Some(filename) = filename_by_uuid.get(&real_uuid) {
-                        handle_to_doc.insert(
-                            h.clone(),
-                            (real_uuid, filename.clone()),
-                        );
-                    }
-                }
-                if let Some((new_body, citations_array)) =
-                    rewrite_inline_docid_citations(&full_response, |h| {
-                        handle_to_doc.get(h).cloned()
-                    })
-                {
-                    let n_refs = citations_array
-                        .as_array()
-                        .map(|a| a.len())
-                        .unwrap_or(0);
-                    tracing::info!(
-                        "[chat] rewrote {n_refs} inline [doc-id: …] reference(s) to [cN] markers"
-                    );
-                    full_response = new_body;
-                    prebuilt_citations = Some(citations_array);
-                    // Live view: replace the message body wholesale so
-                    // pills render immediately for this turn.
+        current_messages.push(Message::assistant_tool_calls(iter_tool_calls.clone()));
+        for call in &iter_tool_calls {
+            emit(&tx, &json!({ "type": "tool_call_start", "name": call.name })).await;
+
+            // A `tool_call_progress` every 5 s: slow MCP tools (for
+            // example with human approval) stay visibly in progress.
+            let started = std::time::Instant::now();
+            let progress_name = call.name.clone();
+            let progress_tx = tx.clone();
+            let progress_task = tokio::spawn(async move {
+                let mut ticker = tokio::time::interval(std::time::Duration::from_secs(5));
+                ticker.tick().await;
+                loop {
+                    ticker.tick().await;
                     let payload = json!({
-                        "type": "content_replace",
-                        "text": full_response,
+                        "type": "tool_call_progress",
+                        "name": progress_name,
+                        "elapsed_secs": started.elapsed().as_secs(),
                     });
-                    let _ = tx
-                        .send(Ok(Event::default().data(payload.to_string())))
-                        .await;
+                    if !emit(&progress_tx, &payload).await {
+                        return;
+                    }
                 }
-            }
-        }
+            });
 
-        // We hold the assistant-message id outside the if-block so the
-        // citations-resolution step below can update the same row with
-        // the parsed annotations JSON. Without that link the chat
-        // history loses citations on reload (`get_messages` returns
-        // content but not annotations) and `[g1]`/`[p1]` pills render
-        // as plain text on old turns.
-        // Persist the assistant turn whenever there's prose OR a
-        // doc_created (or any other persistent event). The empty-prose
-        // case happens when a tool call (e.g. `generate_docx`) is the
-        // only thing the LLM produced this turn — without persistence
-        // the download card would silently vanish on reopen.
-        let asst_msg_id: Option<String> =
-            if !full_response.is_empty() || !persistent_events.is_empty() {
-                let id = uuid::Uuid::new_v4().to_string();
-                let events_json = if persistent_events.is_empty() {
-                    None
-                } else {
-                    Some(Value::Array(persistent_events.clone()).to_string())
-                };
-                let _ = sqlx::query(
-                    "INSERT INTO messages (id, chat_id, role, content, events) \
-                     VALUES (?, ?, 'assistant', ?, ?)",
+            let result = if builtin_tools::is_builtin(&call.name) {
+                tracing::info!("[chat] dispatching builtin tool: {}", call.name);
+                builtin_tools::dispatch(
+                    &state,
+                    &user_id,
+                    Some(&chat_id),
+                    &doc_label_map,
+                    &call.name,
+                    &call.input,
+                    read_budget_chars,
                 )
-                .bind(&id)
-                .bind(&chat_id_clone)
-                .bind(&full_response)
-                .bind(&events_json)
-                .execute(&state_clone.db)
-                .await;
-
-                let _ = sqlx::query(
-                    "UPDATE chats SET updated_at = datetime('now') WHERE id = ?",
-                )
-                .bind(&chat_id_clone)
-                .execute(&state_clone.db)
-                .await;
-                Some(id)
-            } else {
-                None
-            };
-
-        // Parse the trailing <CITATIONS>…</CITATIONS> JSON block the model
-        // is instructed to emit (see MRUST_SYSTEM_PROMPT). Resolve each
-        // citation's `doc_id` (a chat-local label like "doc-0") back to the
-        // real document UUID + filename so the frontend viewer can fetch
-        // and highlight it.
-        let mut id_by_label: HashMap<String, String> = HashMap::new();
-        for (label, uuid) in &doc_label_map {
-            id_by_label.insert(label.clone(), uuid.clone());
-        }
-        // Also fetch filenames so the citation entry contains it.
-        let mut name_by_id: HashMap<String, String> = HashMap::new();
-        for uuid in id_by_label.values() {
-            if let Ok(Some((fname,))) = sqlx::query_as::<_, (String,)>(
-                "SELECT filename FROM documents WHERE id = ? AND user_id = ?",
-            )
-            .bind(uuid)
-            .bind(&auth.user_id)
-            .fetch_optional(&state_clone.db)
-            .await
-            {
-                name_by_id.insert(uuid.clone(), fname);
-            }
-        }
-
-        // Build a tag → KB-entry index so we can resolve [g1]/[p1] back
-        // to the source path the user-side viewer needs.
-        let mut kb_by_tag: HashMap<String, RetrievedKbEntry> = HashMap::new();
-        for entry in &kb_chunks_for_citations {
-            kb_by_tag.insert(entry.tag.clone(), entry.clone());
-        }
-
-        // Build a corpus-identifier → tag fallback index so the citation
-        // resolver can recover when the model invents a doc_id from the
-        // <USER LIBRARY> inventory (e.g. "eurlex_32016R0679" or just
-        // "32016R0679") instead of using the [gN] tag from the
-        // <KNOWLEDGE BASE> section as instructed. Without this fallback
-        // those citations get tagged source="attached", point at no
-        // real document, and render as a 404 in the viewer.
-        //
-        // We index the same chunk under several normalised keys so a
-        // model emitting any of "eurlex_32016R0679", "EUR-Lex/32016R0679",
-        // "32016R0679", or "eurlex:32016R0679" still resolves.
-        let mut corpus_ref_to_tag: HashMap<String, String> = HashMap::new();
-        if !kb_by_tag.is_empty() {
-            let doc_ids: std::collections::HashSet<String> = kb_chunks_for_citations
-                .iter()
-                .map(|e| e.document_id.clone())
-                .collect();
-            if !doc_ids.is_empty() {
-                let placeholders = std::iter::repeat("?")
-                    .take(doc_ids.len())
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let q = format!(
-                    "SELECT id, corpus_id, corpus_identifier FROM documents \
-                     WHERE user_id = ? AND id IN ({}) \
-                       AND corpus_id IS NOT NULL AND corpus_identifier IS NOT NULL",
-                    placeholders
-                );
-                let mut query = sqlx::query_as::<_, (String, String, String)>(&q)
-                    .bind(&auth.user_id);
-                for did in &doc_ids {
-                    query = query.bind(did);
-                }
-                if let Ok(rows) = query.fetch_all(&state_clone.db).await {
-                    // Build a doc_id → tag lookup once, then map every
-                    // alias of (corpus_id, corpus_identifier) to it.
-                    let mut tag_by_doc: HashMap<String, String> = HashMap::new();
-                    for entry in &kb_chunks_for_citations {
-                        tag_by_doc
-                            .entry(entry.document_id.clone())
-                            .or_insert_with(|| entry.tag.clone());
-                    }
-                    for (doc_uuid, corpus_id, ident) in rows {
-                        let Some(tag) = tag_by_doc.get(&doc_uuid) else { continue };
-                        let ident_lower = ident.to_ascii_lowercase();
-                        let corpus_lower = corpus_id.to_ascii_lowercase();
-                        for key in [
-                            ident.clone(),
-                            ident_lower.clone(),
-                            format!("{corpus_id}_{ident}"),
-                            format!("{corpus_lower}_{ident_lower}"),
-                            format!("{corpus_id}:{ident}"),
-                            format!("{corpus_lower}:{ident_lower}"),
-                            format!("{corpus_id}/{ident}"),
-                            format!("{corpus_lower}/{ident_lower}"),
-                        ] {
-                            corpus_ref_to_tag
-                                .entry(key)
-                                .or_insert_with(|| tag.clone());
-                        }
-                    }
-                    if !corpus_ref_to_tag.is_empty() {
-                        tracing::info!(
-                            "[chat] built corpus-ref → tag fallback with {} aliases",
-                            corpus_ref_to_tag.len()
-                        );
-                    }
-                }
-            }
-        }
-
-        // Canonical-key index over the user's FULL corpus library. Catches
-        // the case where the model copies a verbatim inventory line
-        // (e.g. `[italian-legal] corte_costituzionale_1990_241`, with
-        // bracket and whitespace) as `doc_id` instead of the [gN]/[pN]
-        // tag — and where this turn produced no KB chunks at all, so
-        // `corpus_ref_to_tag` above stays empty. The canonical form
-        // strips every non-alphanumeric character and lowercases, so
-        // any separator / case / bracket variant collapses to the same
-        // key. Resolution sets `document_id` + `filename` directly and
-        // marks the citation as a viewable attached document.
-        let mut library_corpus_index: HashMap<String, (String, String)> = HashMap::new();
-        if let Ok(rows) = sqlx::query_as::<_, (String, String, String, String)>(
-            "SELECT id, filename, corpus_id, corpus_identifier FROM documents \
-             WHERE user_id = ? AND corpus_id IS NOT NULL AND corpus_identifier IS NOT NULL",
-        )
-        .bind(&auth.user_id)
-        .fetch_all(&state_clone.db)
-        .await
-        {
-            for (doc_uuid, filename, corpus_id, ident) in rows {
-                // Two canonical variants per row: the bare identifier
-                // (model wrote just the ident) and the combined
-                // corpus_id+ident (model copied the full inventory
-                // prefix). Both collapse to alphanumeric-only,
-                // lowercase under `canonical_corpus_key`.
-                for key_source in [ident.clone(), format!("{corpus_id} {ident}")] {
-                    let canon = canonical_corpus_key(&key_source);
-                    if !canon.is_empty() {
-                        library_corpus_index
-                            .entry(canon)
-                            .or_insert_with(|| (doc_uuid.clone(), filename.clone()));
-                    }
-                }
-            }
-            if !library_corpus_index.is_empty() {
-                tracing::info!(
-                    "[chat] built library corpus canonical index with {} entries",
-                    library_corpus_index.len()
-                );
-            }
-        }
-
-        // Pre-fetch a `document_id → absolute local storage path` map
-        // for this user's corpus docs. Used below to defensively remap
-        // any KB chunk whose `source_path` is the upstream URL (older
-        // `doc_chunks` rows, or any code path that stored the URL
-        // instead of the cached file path) back to the local file
-        // `/sync/kb-doc` can actually `std::fs::read`. The fix lives at
-        // citation-build time, not as a DB migration, so it covers
-        // both pre-existing rows and future regressions uniformly.
-        let mut corpus_local_path_by_docid: HashMap<String, String> = HashMap::new();
-        {
-            let storage_root = std::path::PathBuf::from(
-                std::env::var("STORAGE_PATH")
-                    .unwrap_or_else(|_| "./data/storage".to_string()),
-            );
-            if let Ok(rows) = sqlx::query_as::<_, (String, Option<String>)>(
-                "SELECT id, storage_path FROM documents \
-                 WHERE user_id = ? AND corpus_id IS NOT NULL AND storage_path IS NOT NULL",
-            )
-            .bind(&auth.user_id)
-            .fetch_all(&state_clone.db)
-            .await
-            {
-                for (doc_uuid, sp_opt) in rows {
-                    if let Some(sp) = sp_opt {
-                        let abs = storage_root
-                            .join(sp.replace('/', std::path::MAIN_SEPARATOR_STR));
-                        corpus_local_path_by_docid
-                            .insert(doc_uuid, abs.to_string_lossy().to_string());
-                    }
-                }
-            }
-        }
-
-        // Resolution order: the inline `[doc-id: …]` rewriter wins if it
-        // synthesised any citations earlier (the body is already rewritten
-        // and has `[cN]` markers); otherwise parse a model-emitted block;
-        // otherwise synthesise from inline `[gN]`/`[pN]` KB markers.
-        let citations_source: &'static str;
-        let citations_json = if prebuilt_citations.is_some() {
-            citations_source = "inline-docid-rewriter";
-            prebuilt_citations
-        } else if let Some(parsed) = extract_citations_block(&full_response) {
-            citations_source = "model-emitted-block";
-            let raw_len = parsed
-                .as_array()
-                .map(|a| a.len())
-                .unwrap_or(0);
-            tracing::info!(
-                "[chat][cite-diag] extract_citations_block OK: parsed array has {raw_len} entries"
-            );
-            Some(parsed)
-        } else if let Some(synth) =
-            synthesise_kb_citations_from_markers(&full_response, &kb_by_tag)
-        {
-            citations_source = "kb-marker-synthesis";
-            let synth_len = synth
-                .as_array()
-                .map(|a| a.len())
-                .unwrap_or(0);
-            tracing::info!(
-                "[chat][cite-diag] synthesise_kb_citations_from_markers OK: \
-                 {synth_len} synthesised from inline `g`/`p` markers"
-            );
-            Some(synth)
-        } else {
-            citations_source = "none";
-            tracing::warn!(
-                "[chat][cite-diag] NO citations from any source — \
-                 no <CITATIONS> block, no inline doc-id refs, no `g`/`p` markers \
-                 matching the kb_by_tag map (size={})",
-                kb_by_tag.len()
-            );
-            None
-        };
-        tracing::info!(
-            "[chat][cite-diag] resolution source = {citations_source}, \
-             pre-enrichment entries = {}",
-            citations_json
-                .as_ref()
-                .and_then(|v| v.as_array())
-                .map(|a| a.len())
-                .unwrap_or(0)
-        );
-        let citations_array: Vec<Value> = match citations_json {
-            Some(v) => v
-                .as_array()
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .map(|c| {
-                    let label = c.get("doc_id").and_then(|x| x.as_str()).unwrap_or("");
-                    let mut obj = c.as_object().cloned().unwrap_or_default();
-                    obj.insert("type".into(), Value::String("citation_data".to_string()));
-
-                    // Three resolution paths:
-                    //  - "doc-N"           → attached document, lookup in id_by_label
-                    //  - "g1" / "p1" / ... → KB chunk, lookup in kb_by_tag
-                    //  - corpus identifier → KB chunk, via corpus_ref_to_tag
-                    // Plus normalisation passes for variations the model
-                    // produces in practice: "[g1]" (with brackets),
-                    // "G1" (uppercase), "1" (just the number), and even
-                    // "doc-0" emitted as a generic placeholder when no
-                    // attached docs exist. The last fallback is the
-                    // most robust: quote-based content matching against
-                    // the kb chunks we actually fed to the model.
-                    let original_label = label.to_string();
-                    let normalised = original_label
-                        .trim()
-                        .trim_start_matches('[')
-                        .trim_end_matches(']')
-                        .to_ascii_lowercase();
-                    let mut resolved_label = original_label.clone();
-                    if !kb_by_tag.contains_key(&resolved_label)
-                        && !id_by_label.contains_key(&resolved_label)
-                    {
-                        // Try the normalised form first.
-                        if kb_by_tag.contains_key(&normalised) {
-                            resolved_label = normalised.clone();
-                        } else if id_by_label.contains_key(&normalised) {
-                            resolved_label = normalised.clone();
-                        } else if let Some(tag) = corpus_ref_to_tag
-                            .get(&original_label)
-                            .or_else(|| corpus_ref_to_tag.get(&normalised))
-                        {
-                            tracing::info!(
-                                "[chat] citation doc_id {:?} not a known label/tag; \
-                                 retro-resolving via corpus alias to KB tag {:?}",
-                                original_label,
-                                tag
-                            );
-                            resolved_label = tag.clone();
-                        } else if normalised.chars().all(|c| c.is_ascii_digit())
-                            && !normalised.is_empty()
-                        {
-                            // Bare number like "1": if there's exactly
-                            // one [gN] in kb_by_tag, that's almost
-                            // certainly what the model meant.
-                            let g_keys: Vec<&String> = kb_by_tag
-                                .keys()
-                                .filter(|k| k.starts_with('g'))
-                                .collect();
-                            if g_keys.len() == 1 {
-                                tracing::info!(
-                                    "[chat] citation doc_id {:?} is bare number; \
-                                     mapping to sole KB tag {:?}",
-                                    original_label,
-                                    g_keys[0]
-                                );
-                                resolved_label = g_keys[0].clone();
-                            } else {
-                                let candidate = format!("g{normalised}");
-                                if kb_by_tag.contains_key(&candidate) {
-                                    resolved_label = candidate;
-                                }
-                            }
-                        }
-
-                        // Quote-based content match: when the model
-                        // copied a verbatim excerpt of a chunk into the
-                        // citation quote, we can find the chunk it
-                        // came from and use that tag. Cheaper than the
-                        // single-doc fallback below, and more accurate
-                        // when chunks span multiple corpus docs.
-                        // Requires ≥25-char prefix so a short phrase
-                        // doesn't accidentally match every chunk.
-                        if resolved_label == original_label
-                            && !kb_by_tag.contains_key(&resolved_label)
-                            && !id_by_label.contains_key(&resolved_label)
-                        {
-                            if let Some(quote) = obj.get("quote").and_then(|v| v.as_str()) {
-                                let needle = quote
-                                    .split_whitespace()
-                                    .collect::<Vec<_>>()
-                                    .join(" ")
-                                    .to_lowercase();
-                                let needle_prefix: String =
-                                    needle.chars().take(120).collect();
-                                if needle_prefix.chars().count() >= 25 {
-                                    let mut hit: Option<&str> = None;
-                                    for (tag, kb) in &kb_by_tag {
-                                        let hay = kb
-                                            .text
-                                            .split_whitespace()
-                                            .collect::<Vec<_>>()
-                                            .join(" ")
-                                            .to_lowercase();
-                                        if hay.contains(&needle_prefix) {
-                                            hit = Some(tag.as_str());
-                                            break;
-                                        }
-                                    }
-                                    if let Some(tag) = hit {
-                                        tracing::info!(
-                                            "[chat] citation doc_id {:?} resolved by \
-                                             quote-content match to KB tag {:?}",
-                                            original_label,
-                                            tag
-                                        );
-                                        resolved_label = tag.to_string();
-                                    }
-                                }
-                            }
-                        }
-
-                        // Single-corpus-doc fallback: when every KB
-                        // chunk we surfaced for this turn points at
-                        // the same underlying corpus document, all
-                        // citations almost certainly mean that one
-                        // doc — even a paraphrased quote with a
-                        // hallucinated page is "talking about GDPR".
-                        // Map the unresolved label to any tag from
-                        // that doc so the citation pill at least
-                        // opens the right viewer. Not safe when KB
-                        // chunks span multiple docs (we'd guess).
-                        if resolved_label == original_label
-                            && !kb_by_tag.contains_key(&resolved_label)
-                            && !id_by_label.contains_key(&resolved_label)
-                            && !kb_by_tag.is_empty()
-                        {
-                            let mut doc_ids: std::collections::HashSet<&str> =
-                                std::collections::HashSet::new();
-                            for kb in kb_by_tag.values() {
-                                doc_ids.insert(kb.document_id.as_str());
-                            }
-                            if doc_ids.len() == 1 {
-                                // Pick the lowest-numbered g-tag if any,
-                                // otherwise the first tag we see.
-                                let mut keys: Vec<&String> =
-                                    kb_by_tag.keys().collect();
-                                keys.sort();
-                                let chosen = keys
-                                    .iter()
-                                    .find(|k| k.starts_with('g'))
-                                    .copied()
-                                    .or_else(|| keys.first().copied());
-                                if let Some(tag) = chosen {
-                                    tracing::info!(
-                                        "[chat] citation doc_id {:?} unresolvable; \
-                                         all KB chunks share one corpus doc — \
-                                         routing to KB tag {:?} (page may be \
-                                         hallucinated, viewer still opens correct file)",
-                                        original_label,
-                                        tag
-                                    );
-                                    resolved_label = tag.clone();
-                                    // The model's page is likely
-                                    // hallucinated when it invented
-                                    // the doc_id — drop it so the
-                                    // viewer falls back to opening
-                                    // page 1 / using PDF.js text
-                                    // search on the quote.
-                                    obj.remove("page");
-                                }
-                            }
-                        }
-
-                        if resolved_label != original_label {
-                            obj.insert(
-                                "doc_id".into(),
-                                Value::String(resolved_label.clone()),
-                            );
-                        }
-                    }
-                    let label = resolved_label.as_str();
-                    if let Some(kb) = kb_by_tag.get(label) {
-                        // Strip our scanner's `[Page N]` markers from
-                        // the quote — the model often copies them
-                        // verbatim from the chunk text we fed it, but
-                        // they don't exist in the underlying PDF, so
-                        // PDF.js text-search can't match.
-                        if let Some(q) = obj.get("quote").and_then(|v| v.as_str()) {
-                            let cleaned = strip_page_markers(q);
-                            if cleaned != q {
-                                obj.insert("quote".into(), Value::String(cleaned));
-                            }
-                        }
-                        // Hallucinated-quote safety net: validate the
-                        // model's quote against the chunk text we
-                        // actually retrieved. The frontend's highlight
-                        // is letters-only-and-lower-cased; mirror that
-                        // here. If the projection of the quote isn't a
-                        // substring of the projection of the chunk
-                        // text, the model invented the quote (most
-                        // often by citing one of its own section
-                        // headings instead of the source) — replace
-                        // it with the chunk's real opening so the
-                        // viewer at least lands on the cited passage.
-                        if let Some(q) = obj.get("quote").and_then(|v| v.as_str()) {
-                            let chunk_clean = strip_page_markers(&kb.text);
-                            let needle = letters_only(q);
-                            let haystack = letters_only(&chunk_clean);
-                            if needle.len() >= 4 && !haystack.contains(&needle) {
-                                let trimmed = chunk_clean.trim();
-                                let cap = 200.min(trimmed.len());
-                                let mut end = cap;
-                                while end < trimmed.len()
-                                    && !trimmed.is_char_boundary(end)
-                                {
-                                    end += 1;
-                                }
-                                let fallback = trimmed[..end].to_string();
-                                tracing::warn!(
-                                    "[chat] citation quote not found in chunk for tag {label:?} \
-                                     (doc {:?}, chunk {}): model emitted {:?}; \
-                                     substituting first {} chars of chunk text",
-                                    kb.document_id,
-                                    kb.chunk_index,
-                                    q.chars().take(80).collect::<String>(),
-                                    fallback.len()
-                                );
-                                obj.insert("quote".into(), Value::String(fallback));
-                            }
-                        }
-                        obj.insert("source".into(), Value::String("kb".to_string()));
-                        obj.insert("scope".into(), Value::String(kb.scope_label.to_string()));
-                        // Remap URL-shaped source_path back to the local
-                        // cache file. EUR-Lex (and any corpus that stored
-                        // the upstream URL in older indexing runs) needs
-                        // this — /sync/kb-doc does std::fs::read on the
-                        // value and can't take a URL.
-                        let mut path_value = kb.source_path.clone();
-                        if path_value.starts_with("http://")
-                            || path_value.starts_with("https://")
-                        {
-                            if let Some(local) =
-                                corpus_local_path_by_docid.get(&kb.document_id)
-                            {
-                                tracing::info!(
-                                    "[chat] remapping URL source_path → local storage path \
-                                     for doc {:?} (was {:?})",
-                                    kb.document_id,
-                                    path_value
-                                );
-                                path_value = local.clone();
-                            } else {
-                                tracing::warn!(
-                                    "[chat] citation source_path is a URL ({:?}) but no \
-                                     local storage_path is registered under documents \
-                                     for doc_id {:?} — viewer will 404",
-                                    path_value,
-                                    kb.document_id
-                                );
-                            }
-                        }
-                        obj.insert("path".into(), Value::String(path_value));
-                        obj.insert("chunk_index".into(), Value::Number(kb.chunk_index.into()));
-                        // document_id here points to the synced_files entry,
-                        // not the upload-flow `documents` row — same field name
-                        // for frontend simplicity.
-                        obj.insert(
-                            "document_id".into(),
-                            Value::String(kb.document_id.clone()),
-                        );
-                        let basename = std::path::Path::new(&kb.source_path)
-                            .file_name()
-                            .map(|f| f.to_string_lossy().to_string())
-                            .unwrap_or_else(|| kb.source_path.clone());
-                        obj.insert("filename".into(), Value::String(basename));
-                        // Page assignment: prefer the page the model
-                        // emitted in <CITATIONS> if present. The model
-                        // can see the literal `[Page N]` markers we
-                        // prepend to each PDF page in the chunk text,
-                        // and is more accurate per-quote than the
-                        // chunker's coarse "page where this chunk
-                        // STARTS" assignment — that one is wrong
-                        // whenever a chunk spans multiple pages OR
-                        // when the model picks a quote from the
-                        // chunk's leading overlap section (which
-                        // came from the previous chunk and may
-                        // belong to a different page than the chunk
-                        // is tagged with).
-                        // Only stamp `kb.page` as a fallback when the
-                        // model didn't provide a usable page.
-                        let model_page_ok = obj
-                            .get("page")
-                            .map(|v| v.is_i64() || v.is_string())
-                            .unwrap_or(false);
-                        if !model_page_ok {
-                            if let Some(p) = kb.page {
-                                obj.insert("page".into(), Value::Number(p.into()));
-                            }
-                        }
-                    } else {
-                        obj.insert("source".into(), Value::String("attached".to_string()));
-                        let mut uuid = id_by_label.get(label).cloned();
-                        let mut filename = uuid
-                            .as_ref()
-                            .and_then(|u| name_by_id.get(u))
-                            .cloned()
-                            .unwrap_or_default();
-                        // Filename-as-doc_id fallback: the model
-                        // sometimes lifts an attached file's filename
-                        // straight from the inventory block in the
-                        // system prompt and emits it as the citation's
-                        // `doc_id` instead of the canonical `doc-N`
-                        // handle (most common when many docs are
-                        // attached in the same chat). Resolving that
-                        // back to the right UUID keeps the viewer
-                        // from 404-ing on `/document/<filename>/display`.
-                        if uuid.is_none() {
-                            for (id, fname) in &name_by_id {
-                                if fname == label {
-                                    tracing::info!(
-                                        "[chat] citation doc_id {:?} resolved via attached-filename match (model emitted filename instead of doc-N handle)",
-                                        label
-                                    );
-                                    uuid = Some(id.clone());
-                                    if filename.is_empty() {
-                                        filename = fname.clone();
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                        // Last-resort: canonical-key match against the
-                        // user's full corpus library. Catches the model
-                        // copying an inventory line verbatim (bracket +
-                        // space + identifier) as `doc_id` even when no
-                        // KB chunks were retrieved this turn.
-                        if uuid.is_none() {
-                            let canon = canonical_corpus_key(label);
-                            if !canon.is_empty()
-                                && let Some((corp_uuid, corp_filename)) =
-                                    library_corpus_index.get(&canon)
-                            {
-                                tracing::info!(
-                                    "[chat] citation doc_id {:?} resolved to corpus document {:?} via canonical-key match",
-                                    label,
-                                    corp_filename
-                                );
-                                uuid = Some(corp_uuid.clone());
-                                if filename.is_empty() {
-                                    filename = corp_filename.clone();
-                                }
-                                // The model invented the doc_id from the
-                                // inventory line — page (if any) is
-                                // almost certainly hallucinated. Drop it
-                                // so the viewer text-searches the quote
-                                // instead of jumping to a fake page.
-                                obj.remove("page");
-                            }
-                        }
-                        if let Some(uuid) = uuid {
-                            obj.insert("document_id".into(), Value::String(uuid));
-                        }
-                        if !filename.is_empty() {
-                            obj.insert("filename".into(), Value::String(filename));
-                        }
-                    }
-                    Value::Object(obj)
-                })
-                .collect(),
-            None => Vec::new(),
-        };
-        tracing::info!("[chat] parsed {} citations from response", citations_array.len());
-
-        // Persist the citation annotations on the assistant message so
-        // GET /chat/:id/messages can hand them back when the user
-        // reopens this chat from the sidebar.
-        if let Some(id) = &asst_msg_id {
-            let annotations_json = if citations_array.is_empty() {
-                None
-            } else {
-                Some(Value::Array(citations_array.clone()).to_string())
-            };
-            match sqlx::query("UPDATE messages SET annotations = ? WHERE id = ?")
-                .bind(&annotations_json)
-                .bind(id)
-                .execute(&state_clone.db)
                 .await
-            {
-                Ok(r) => tracing::info!(
-                    "[chat] annotations persisted on message id={} rows_affected={} payload_bytes={}",
-                    id,
-                    r.rows_affected(),
-                    annotations_json.as_ref().map(|s| s.len()).unwrap_or(0),
-                ),
-                Err(e) => tracing::error!(
-                    "[chat] FAILED to persist annotations on id={}: {e}",
-                    id
-                ),
+            } else {
+                tracing::info!("[chat] dispatching MCP tool: {}", call.name);
+                // `request_*` calls with a pending session continue
+                // automatically with the matching `get_*`.
+                dispatch_mcp_tool_with_async_chain(&mcp_servers, &call.name, &call.input).await
+            };
+            progress_task.abort();
+            emit(&tx, &json!({ "type": "tool_call_done", "name": call.name })).await;
+
+            if result.len() <= 200 {
+                tracing::info!("[chat] tool {} result ({} chars): {result}", call.name, result.len());
+            } else {
+                tracing::info!("[chat] tool {} result: {} chars", call.name, result.len());
             }
-        }
 
-        // Diagnostic: log the doc_id/source/page of each parsed citation
-        // so we can tell whether the model emitted attached-style numeric
-        // refs vs KB-style g1/p1 tags, and whether kb_by_tag matched.
-        for (i, c) in citations_array.iter().enumerate() {
-            tracing::info!(
-                "[chat]   citation #{i}: doc_id={:?} source={:?} page={:?} ref={:?}",
-                c.get("doc_id").and_then(|v| v.as_str()),
-                c.get("source").and_then(|v| v.as_str()),
-                c.get("page"),
-                c.get("ref"),
-            );
-        }
+            // A document created mid-turn joins the `doc-N` labels: the
+            // model needs a label to cite it with (the raw UUID is not a
+            // citable handle) and the citation resolver needs the label
+            // to find the row. Without this the model invents `doc-1`
+            // and the viewer asks the backend for a label.
+            let result = match register_generated_document(&call.name, &result, &mut doc_label_map) {
+                Some(annotated) => annotated,
+                None => result,
+            };
 
+            if let Some(event) = tool_step_event(&call.name, &result) {
+                // One card per document, however many times the turn
+                // touched it: two edits in a row on the same file would
+                // otherwise look like two different documents, and the
+                // download link always serves the latest bytes anyway.
+                let duplicate_card = event["type"] == "doc_created"
+                    && event
+                        .get("document_id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|id| !carded_documents.insert(id.to_string()));
+                if !duplicate_card {
+                    emit(&tx, &event).await;
+                    if event["type"] == "doc_created" {
+                        let mut stored = event;
+                        stored["isStreaming"] = Value::Bool(false);
+                        persistent_events.push(stored);
+                    }
+                }
+            }
+            current_messages.push(Message::tool_result(&call.id, &call.name, &result));
+        }
+    }
+    drop(current_messages);
+    drop(all_tools);
+
+    tracing::info!(
+        "[chat] stream finished: chars={}, errored={errored}",
+        full_response.len()
+    );
+
+    // Model-independent normalisation: a tool result the model pasted
+    // into its own answer never belongs in the prose — the download card
+    // and the step list already carry it.
+    if let std::borrow::Cow::Owned(cleaned) = tool_echo::strip_echoed_tool_results(&full_response) {
         tracing::info!(
-            "[chat][cite-diag] FINAL citations SSE payload: {} entr{}, \
-             source={citations_source}",
-            citations_array.len(),
-            if citations_array.len() == 1 { "y" } else { "ies" }
+            "[chat] tool-result echo stripped from response: {} → {} chars",
+            full_response.len(),
+            cleaned.len()
         );
-        let done_payload = json!({ "type": "citations", "citations": citations_array });
-        let _ = tx
-            .send(Ok(Event::default().data(done_payload.to_string())))
-            .await;
-    });
+        full_response = cleaned;
+        emit(&tx, &json!({ "type": "content_replace", "text": &full_response })).await;
+    }
 
-    let sse_stream = ReceiverStream::new(rx);
-    Sse::new(sse_stream)
-        .keep_alive(axum::response::sse::KeepAlive::default())
-        .into_response()
+    // Model-independent normalisation: `[c1, c2, FILE.pdf, p.4]`
+    // is split into valid markers before any other analysis.
+    let pre_split_len = full_response.len();
+    if let std::borrow::Cow::Owned(split) = split_hybrid_citation_brackets(&full_response) {
+        full_response = split;
+        tracing::info!(
+            "[chat] hybrid-citation-bracket splitter rewrote response: {pre_split_len} → {} chars",
+            full_response.len()
+        );
+        emit(&tx, &json!({ "type": "content_replace", "text": &full_response })).await;
+    }
+
+    {
+        let lower = full_response.to_ascii_lowercase();
+        let tail = full_response
+            .char_indices()
+            .rev()
+            .nth(800)
+            .map(|(i, _)| &full_response[i..])
+            .unwrap_or(full_response.as_str());
+        tracing::info!(
+            "[chat][cite-diag] final response: {} chars, {} '[' total, <CITATIONS>={}, </CITATIONS>={}",
+            full_response.chars().count(),
+            full_response.matches('[').count(),
+            lower.contains("<citations>"),
+            lower.contains("</citations>")
+        );
+        tracing::info!("[chat][cite-diag] tail (last 800 chars):\n{tail}");
+    }
+
+    // Free-form references `[doc-id: …, page N]` rewritten as `[cN]` with
+    // their citations, before saving.
+    let model_block = extract_citations_block(&full_response);
+    let mut prebuilt_citations: Option<Value> = None;
+    if model_block.is_none()
+        && let Some((new_body, citations)) =
+            rewrite_inline_references(&state, &user_id, &doc_label_map, &full_response).await
+    {
+        full_response = new_body;
+        prebuilt_citations = Some(citations);
+        emit(&tx, &json!({ "type": "content_replace", "text": &full_response })).await;
+    }
+
+    // The turn is saved even without text if it produced persistent events
+    // (e.g. only generate_docx), otherwise the download card
+    // would disappear when the chat is reopened.
+    let asst_msg_id: Option<String> = if !full_response.is_empty() || !persistent_events.is_empty() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let events_json = (!persistent_events.is_empty())
+            .then(|| Value::Array(std::mem::take(&mut persistent_events)).to_string());
+        let _ = sqlx::query(
+            "INSERT INTO messages (id, chat_id, role, content, events) VALUES (?, ?, 'assistant', ?, ?)",
+        )
+        .bind(&id)
+        .bind(&chat_id)
+        .bind(&full_response)
+        .bind(&events_json)
+        .execute(&state.db)
+        .await;
+        let _ = sqlx::query("UPDATE chats SET updated_at = datetime('now') WHERE id = ?")
+            .bind(&chat_id)
+            .execute(&state.db)
+            .await;
+        Some(id)
+    } else {
+        None
+    };
+
+    // Citation source, in order: rewrite of free-form references,
+    // the model's <CITATIONS> block, synthesis from [gN]/[pN] markers.
+    let kb_by_tag: HashMap<String, RetrievedKbEntry> =
+        kb_chunks.into_iter().map(|e| (e.tag.clone(), e)).collect();
+    let (citations_source, citations_json) = if let Some(prebuilt) = prebuilt_citations {
+        ("inline-docid-rewriter", Some(prebuilt))
+    } else if let Some(parsed) = model_block {
+        ("model-emitted-block", Some(parsed))
+    } else if let Some(synth) = synthesise_kb_citations_from_markers(&full_response, &kb_by_tag) {
+        ("kb-marker-synthesis", Some(synth))
+    } else {
+        tracing::warn!(
+            "[chat][cite-diag] NO citations from any source — no <CITATIONS> block, no inline doc-id refs, no `g`/`p` markers matching the kb_by_tag map (size={})",
+            kb_by_tag.len()
+        );
+        ("none", None)
+    };
+    tracing::info!(
+        "[chat][cite-diag] resolution source = {citations_source}, pre-enrichment entries = {}",
+        citations_json.as_ref().and_then(|v| v.as_array()).map_or(0, Vec::len)
+    );
+
+    let citations: Vec<Value> = match citations_json {
+        Some(v) if v.as_array().is_some_and(|a| !a.is_empty()) => {
+            citation_resolution::CitationResolver::load(&state, &user_id, &doc_label_map, &kb_by_tag)
+                .await
+                .resolve_all(v)
+        }
+        _ => Vec::new(),
+    };
+    for (i, c) in citations.iter().enumerate() {
+        tracing::info!(
+            // `document_id` is what the viewer will fetch: logging it
+            // separates "the model cited doc-1" from "doc-1 resolved to
+            // a real row", which look identical without it.
+            "[chat]   citation #{i}: doc_id={:?} document_id={:?} source={:?} page={:?} ref={:?}",
+            c.get("doc_id").and_then(|v| v.as_str()),
+            c.get("document_id").and_then(|v| v.as_str()),
+            c.get("source").and_then(|v| v.as_str()),
+            c.get("page"),
+            c.get("ref"),
+        );
+    }
+    let citation_count = citations.len();
+    let citations = Value::Array(citations);
+
+    // Annotations stay on the message for when the chat is reopened.
+    if let Some(id) = &asst_msg_id {
+        let annotations_json = (citation_count > 0).then(|| citations.to_string());
+        match sqlx::query("UPDATE messages SET annotations = ? WHERE id = ?")
+            .bind(&annotations_json)
+            .bind(id)
+            .execute(&state.db)
+            .await
+        {
+            Ok(r) => tracing::info!(
+                "[chat] annotations persisted on message id={id} rows_affected={} payload_bytes={}",
+                r.rows_affected(),
+                annotations_json.as_ref().map_or(0, String::len),
+            ),
+            Err(e) => tracing::error!("[chat] FAILED to persist annotations on id={id}: {e}"),
+        }
+    }
+
+    tracing::info!(
+        "[chat][cite-diag] FINAL citations SSE payload: {citation_count} entr{}, source={citations_source}",
+        if citation_count == 1 { "y" } else { "ies" }
+    );
+    emit(&tx, &json!({ "type": "citations", "citations": citations })).await;
+}
+
+/// Gives a document just created by a tool the next `doc-N` label and
+/// tells the model about it. Returns the annotated tool result, or
+/// `None` when the call created nothing (wrong tool, error result,
+/// already-labelled document).
+///
+/// The label is what makes a generated document citable: the prompt
+/// asks for `doc_id` in the `<CITATIONS>` block to be a `doc-N` handle,
+/// and the resolver only maps handles it knows. A generated document
+/// that never gets one leaves the model guessing `doc-1` and the viewer
+/// requesting `/document/doc-1/display`.
+fn register_generated_document(
+    tool_name: &str,
+    result: &str,
+    doc_label_map: &mut HashMap<String, String>,
+) -> Option<String> {
+    if !matches!(tool_name, "generate_docx" | "generate_xlsx") {
+        return None;
+    }
+    let mut rv: Value = serde_json::from_str(result).ok()?;
+    if rv.get("error").is_some() {
+        return None;
+    }
+    let doc_id = rv.get("doc_id").and_then(Value::as_str)?.to_string();
+    if doc_id.is_empty() || doc_id.starts_with("doc-") {
+        return None;
+    }
+    let label = doc_label_map
+        .iter()
+        .find(|(_, id)| **id == doc_id)
+        .map(|(label, _)| label.clone())
+        .unwrap_or_else(|| {
+            let label = format!("doc-{}", doc_label_map.len() + 1);
+            doc_label_map.insert(label.clone(), doc_id.clone());
+            label
+        });
+    let map = rv.as_object_mut()?;
+    map.insert("doc_label".into(), json!(label));
+    let note = map
+        .get("note")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_default();
+    map.insert(
+        "note".into(),
+        json!(format!(
+            "{note} Cite this document as \"{label}\" in the <CITATIONS> block; \
+             read_document accepts either \"{label}\" or the doc_id."
+        )
+        .trim()
+        .to_string()),
+    );
+    tracing::info!("[chat] generated document {doc_id} labelled {label} for citations");
+    Some(rv.to_string())
+}
+
+/// Progress event for built-in tools that have a dedicated rendering
+/// in the UI. Based on the tool name rather than on the
+/// result shape: read_document also returns doc_id and filename.
+fn tool_step_event(tool_name: &str, result: &str) -> Option<Value> {
+    let rv: Value = serde_json::from_str(result).ok()?;
+    if rv.get("error").is_some() {
+        return None;
+    }
+    let s = |k: &str| rv.get(k).and_then(Value::as_str).unwrap_or("");
+    match tool_name {
+        "generate_docx" | "generate_xlsx" => {
+            let (doc_id, filename) = (s("doc_id"), s("filename"));
+            (!doc_id.is_empty() && !filename.is_empty()).then(|| {
+                json!({
+                    "type": "doc_created",
+                    "filename": filename,
+                    "download_url": format!("/document/{doc_id}/download"),
+                    "document_id": doc_id,
+                })
+            })
+        }
+        // An edited document is a document the user wants to download
+        // too: without a card the only visible trace of the edit is the
+        // prose, which is what pushes weaker models to paste the raw
+        // tool JSON instead.
+        "edit_document" => {
+            let (doc_id, filename) = (s("document_id"), s("filename"));
+            (!doc_id.is_empty() && !filename.is_empty()).then(|| {
+                json!({
+                    "type": "doc_created",
+                    "filename": filename,
+                    "download_url": format!("/document/{doc_id}/download"),
+                    "document_id": doc_id,
+                })
+            })
+        }
+        "read_document" => Some(json!({
+            "type": "doc_read",
+            "doc_id": s("doc_id"),
+            "filename": s("filename"),
+        })),
+        "find_in_document" => Some(json!({
+            "type": "doc_find",
+            "doc_id": s("doc_id"),
+            "filename": s("filename"),
+            "query": s("query"),
+            "match_count": rv.get("match_count").and_then(Value::as_u64).unwrap_or(0),
+        })),
+        "read_workflow" => Some(json!({
+            "type": "workflow_applied",
+            "workflow_id": s("workflow_id"),
+            "title": s("title"),
+        })),
+        _ => None,
+    }
+}
+
+/// Rewrites free-form references `[doc-id: <handle>, page N]` (and similar)
+/// as `[cN]` markers, resolving doc-N labels, UUIDs and file
+/// names against the user's documents with a single query.
+async fn rewrite_inline_references(
+    state: &AppState,
+    user_id: &str,
+    doc_label_map: &HashMap<String, String>,
+    text: &str,
+) -> Option<(String, Value)> {
+    let inline_refs = extract_inline_docid_refs(text);
+    if inline_refs.is_empty() {
+        return None;
+    }
+    let handles: HashSet<&str> = inline_refs.iter().map(|r| r.handle.as_str()).collect();
+    let uuids: HashSet<&str> = handles
+        .iter()
+        .filter_map(|h| match doc_label_map.get(*h) {
+            Some(uuid) => Some(uuid.as_str()),
+            None if h.len() == 36 && h.matches('-').count() == 4 => Some(*h),
+            None => None,
+        })
+        .collect();
+
+    let mut filename_by_uuid: HashMap<String, String> = HashMap::new();
+    if !uuids.is_empty() {
+        let sql = format!(
+            "SELECT id, filename FROM documents WHERE user_id = ? AND id IN ({})",
+            sql_placeholders(uuids.len())
+        );
+        let mut query = sqlx::query_as::<_, (String, String)>(&sql).bind(user_id);
+        for u in &uuids {
+            query = query.bind(*u);
+        }
+        if let Ok(rows) = query.fetch_all(&state.db).await {
+            filename_by_uuid.extend(rows);
+        }
+    }
+    // The model sometimes uses the file name as a handle.
+    let uuid_by_filename: HashMap<&str, &str> = filename_by_uuid
+        .iter()
+        .map(|(uuid, fname)| (fname.as_str(), uuid.as_str()))
+        .collect();
+    let handle_to_doc: HashMap<&str, (String, String)> = handles
+        .iter()
+        .filter_map(|h| {
+            let uuid = doc_label_map
+                .get(*h)
+                .map(String::as_str)
+                .or_else(|| uuid_by_filename.get(h).copied())
+                .unwrap_or(*h);
+            let filename = filename_by_uuid.get(uuid)?;
+            Some((*h, (uuid.to_string(), filename.clone())))
+        })
+        .collect();
+
+    let (new_body, citations) =
+        rewrite_inline_docid_citations(text, |h| handle_to_doc.get(h).cloned())?;
+    tracing::info!(
+        "[chat] rewrote {} inline [doc-id: …] reference(s) to [cN] markers",
+        citations.as_array().map_or(0, Vec::len)
+    );
+    Some((new_body, citations))
 }
 
 // ---------------------------------------------------------------------------
@@ -6088,10 +4979,7 @@ async fn generate_title(
 
     let local_config = build_local_config(&title_model, user_settings.as_ref());
 
-    let prompt = format!(
-        "Generate a concise 3-5 word title (no quotes, no punctuation) for a chat that begins with this user message:\n\n{}",
-        first_msg.chars().take(500).collect::<String>()
-    );
+    let prompt = prompts::title_prompt(&first_msg);
 
     let params = StreamParams {
         model: title_model.clone(),
@@ -6158,10 +5046,77 @@ mod tests {
     use super::{
         canonical_corpus_key, enrich_doc_citations, extract_citations_block,
         extract_inline_docid_refs, extract_inline_paren_doc_refs,
-        rewrite_inline_docid_citations, sanitise_annotations_quotes,
-        split_hybrid_citation_brackets, strip_page_markers,
+        register_generated_document, rewrite_inline_docid_citations,
+        sanitise_annotations_quotes, split_hybrid_citation_brackets, strip_page_markers,
+        tool_step_event,
     };
     use serde_json::{json, Value};
+    use std::collections::HashMap;
+
+    #[test]
+    fn generated_document_gets_the_next_label_and_is_citable() {
+        let mut labels: HashMap<String, String> = HashMap::new();
+        let result = json!({"doc_id": "1f4c", "filename": "Contratto.docx", "note": "Persisted."});
+        let annotated =
+            register_generated_document("generate_docx", &result.to_string(), &mut labels).unwrap();
+        let rv: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(rv["doc_label"], "doc-1");
+        assert!(rv["note"].as_str().unwrap().contains("doc-1"));
+        assert_eq!(labels.get("doc-1").map(String::as_str), Some("1f4c"));
+    }
+
+    #[test]
+    fn generated_document_label_follows_the_attachments() {
+        let mut labels: HashMap<String, String> =
+            HashMap::from([("doc-1".to_string(), "aaa".to_string())]);
+        let result = json!({"doc_id": "bbb", "filename": "B.docx"});
+        let annotated =
+            register_generated_document("generate_xlsx", &result.to_string(), &mut labels).unwrap();
+        let rv: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(rv["doc_label"], "doc-2");
+        assert_eq!(labels.len(), 2);
+    }
+
+    #[test]
+    fn generated_document_keeps_its_label_when_already_known() {
+        let mut labels: HashMap<String, String> =
+            HashMap::from([("doc-3".to_string(), "ccc".to_string())]);
+        let result = json!({"doc_id": "ccc", "filename": "C.docx"});
+        let annotated =
+            register_generated_document("generate_docx", &result.to_string(), &mut labels).unwrap();
+        let rv: Value = serde_json::from_str(&annotated).unwrap();
+        assert_eq!(rv["doc_label"], "doc-3");
+        assert_eq!(labels.len(), 1);
+    }
+
+    #[test]
+    fn failed_generation_gets_no_label() {
+        let mut labels: HashMap<String, String> = HashMap::new();
+        let result = json!({"error": "storage write: disk full"});
+        assert!(register_generated_document("generate_docx", &result.to_string(), &mut labels)
+            .is_none());
+        assert!(labels.is_empty());
+        // Other tools never create a label either.
+        let read = json!({"doc_id": "doc-1", "filename": "A.docx"});
+        assert!(
+            register_generated_document("read_document", &read.to_string(), &mut labels).is_none()
+        );
+        assert!(labels.is_empty());
+    }
+
+    #[test]
+    fn edited_document_gets_a_download_card() {
+        let result = json!({
+            "doc_id": "doc-2",
+            "document_id": "4a7e",
+            "filename": "Contratto.docx",
+            "edits_applied": [{"find": "a", "replace": "b", "hits": 1}],
+        });
+        let event = tool_step_event("edit_document", &result.to_string()).unwrap();
+        assert_eq!(event["type"], "doc_created");
+        assert_eq!(event["document_id"], "4a7e");
+        assert_eq!(event["download_url"], "/document/4a7e/download");
+    }
 
     #[test]
     fn sanitise_annotations_quotes_strips_each_entry() {
@@ -6448,7 +5403,7 @@ mod tests {
     #[test]
     fn split_hybrid_passes_non_citation_brackets_through() {
         // Brackets that contain neither refs nor doc-ish tokens stay
-        // verbatim — Mike must not rewrite `[3]` page numbers in
+        // verbatim — the rewriter must not rewrite `[3]` page numbers in
         // unrelated prose, square-bracketed paraphrase, etc.
         let text = "Art. 32 [3] del decreto, articolo [vedi nota].";
         let out = split_hybrid_citation_brackets(text);

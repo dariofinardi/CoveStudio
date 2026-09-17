@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Generic corpus panel. Drives any registered corpus plugin — Italian
   Legal (dedicated /italian-legal/* routes) or a declarative plugin

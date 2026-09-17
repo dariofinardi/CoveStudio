@@ -23,9 +23,9 @@
 use std::collections::HashMap;
 use std::io::Read;
 
-use mike::docx;
-use mike::presets::docx_template::{load_docx_templates, DocxTemplate};
-use mike::presets::config_subdir;
+use cove_studio::docx;
+use cove_studio::presets::docx_template::{load_docx_templates, DocxTemplate};
+use cove_studio::presets::config_subdir;
 
 /// Find the Diffida template from the shipped registry.
 fn load_diffida() -> DocxTemplate {

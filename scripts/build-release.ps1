@@ -1,8 +1,8 @@
-# Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+# Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Build MikeRust release MSI installers for Windows x86_64 and ARM64,
+  Build Cove Studio release MSI installers for Windows x86_64 and ARM64,
   bundle the matching native DLLs (onnxruntime + pdfium), and collect
   the artefacts under ./dist/.
 
@@ -185,9 +185,9 @@ function New-ResourcesOverlay {
     #
     # The empty `beforeBuildCommand` is essential: this overlay is used
     # by the *bundle* phase, which runs after cargo has already produced
-    # mike-tauri.exe and after we have swept the stray provider DLLs.
+    # cove-studio.exe and after we have swept the stray provider DLLs.
     # The default `pnpm --dir ./frontend build` would write fresh
-    # timestamps into frontend/dist, invalidating mike-tauri's cargo
+    # timestamps into frontend/dist, invalidating cove-studio's cargo
     # fingerprint, triggering a full re-link, triggering ort's
     # copy-dylibs step again, re-emitting the same 617 MB CUDA EP DLL
     # we just deleted. Silencing pnpm here keeps cargo a true no-op so
@@ -210,6 +210,9 @@ function New-ResourcesOverlay {
         "../config/column-presets/**/*.json"                = "config/column-presets/"
         "../config/docx-templates/**/*.json"                = "config/docx-templates/"
         "../config/model.json"                              = "config/model.json"
+        # Local models catalogue for the secure local mode
+        # (crate::presets::local_models).
+        "../config/local-models/*.json"                     = "config/local-models/"
         # Domain-aware system-prompt prologue (v0.4.0). Six locale
         # sub-folders × 11 domains = 66 Markdown files; the Rust
         # loader in crate::presets::system_prompt walks
@@ -224,6 +227,9 @@ function New-ResourcesOverlay {
         # install the same target file"). Mapping each locale to its
         # own destination subdir preserves the `<locale>/<domain>.md`
         # layout the Rust loader expects.
+        # Base assistant instructions (loaded by
+        # crate::presets::system_prompt::base_instructions).
+        "../config/system-prompts/base.md"                  = "config/system-prompts/base.md"
         "../config/system-prompts/it/*.md"                  = "config/system-prompts/it/"
         "../config/system-prompts/en/*.md"                  = "config/system-prompts/en/"
         "../config/system-prompts/fr/*.md"                  = "config/system-prompts/fr/"
@@ -248,7 +254,7 @@ Write-Host ("Host architecture: {0}" -f $hostArch) -ForegroundColor DarkGray
 # Build the frontend ONCE up front. The arch loop's bundle phase used
 # to depend on tauri's `beforeBuildCommand` to invoke `pnpm build`, but
 # every pnpm invocation rewrites frontend/dist with fresh timestamps —
-# which invalidates mike-tauri's cargo fingerprint between phase 1 and
+# which invalidates cove-studio's cargo fingerprint between phase 1 and
 # phase 2, defeating the DLL sweep. Building the frontend once before
 # the loop and silencing `beforeBuildCommand` in the bundle-phase
 # overlay lets cargo be a true incremental no-op on the second pass.
@@ -309,7 +315,7 @@ foreach ($arch in $archesToBuild) {
     #    into <install>/resources/libs/<lib>/win-<arch>/.
     # Phase 1 uses `cargo build` directly because the Tauri CLI we
     # ship rejects `--bundles none` (only knows `msi` / `nsis`). The
-    # mike-tauri binary doesn't need the frontend dist to compile —
+    # cove-studio binary doesn't need the frontend dist to compile —
     # frontend assets are bundled at WiX time in phase 2 — so we can
     # safely skip `pnpm build` here too. Phase 2's `tauri build` then
     # runs `pnpm build` via `beforeBuildCommand`, finds cargo already

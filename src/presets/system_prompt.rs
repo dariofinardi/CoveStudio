@@ -1,23 +1,24 @@
-// Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 
 //! Domain-aware system-prompt **prologue**. Read once at chat-turn
 //! time from `config/system-prompts/<locale>/<domain>.md` and
-//! prepended to `MRUST_SYSTEM_PROMPT` so the assistant boots with a
-//! professional-vertical persona before the generic Mike tool-use /
-//! citation rules kick in.
+//! prepended to the base instructions (`config/system-prompts/base.md`,
+//! see [`base_instructions`]) so the
+//! assistant boots with a professional-vertical persona before the
+//! generic tool-use / citation rules kick in.
 //!
 //! Resolution fall-back chain (first hit wins):
 //!
 //!   1. requested locale + requested domain
 //!   2. `"it"` + requested domain (`it` is the primary curated
-//!      locale — MikeRust's first-class users are Italian)
+//!      locale — Cove Studio's first-class users are Italian)
 //!   3. `"en"` + requested domain (every domain ships an English
 //!      version, so this is the last-stand language fallback)
 //!   4. `None` — the caller composes a prologue without a domain body
 //!
 //! The directory hosting the files is found the same way the other
 //! `crate::presets::*` registries find theirs: env-var override
-//! (`MRUST_SYSTEM_PROMPTS_DIR`), CWD ancestor walk, then exe-dir
+//! (`COVE_SYSTEM_PROMPTS_DIR`), CWD ancestor walk, then exe-dir
 //! ancestor walk — so dev (cwd = workspace root) and installed-MSI
 //! (cwd = anywhere, exe = `<install>/`) both land on the bundled
 //! files without configuration.
@@ -40,7 +41,7 @@ const FALLBACK_LOCALES: &[&str] = &["it", "en"];
 /// dev workspace layout (`<repo>/config/system-prompts/`) both work
 /// without an env-var override.
 fn root_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("MRUST_SYSTEM_PROMPTS_DIR") {
+    if let Some(dir) = crate::product::env_var("SYSTEM_PROMPTS_DIR") {
         return PathBuf::from(dir);
     }
     if let Ok(cwd) = std::env::current_dir() {
@@ -100,19 +101,93 @@ pub fn resolve(locale: &str, domain: &str) -> Option<String> {
     None
 }
 
-/// Map a UI / chat locale to its conventional default country string.
-/// Surfaced verbatim in the prologue (`Default country: Italy`) so the
-/// model knows what jurisdiction to assume absent explicit signals.
-/// The English mapping is intentionally vague ("ask the user") because
-/// the en locale legitimately spans US / UK / IE / AU / CA / NZ / IN.
+/// Base assistant instructions, stored in `config/system-prompts/base.md`.
+/// The same file is embedded at build time as the fallback, so the
+/// Markdown stays the single source of the text.
+const EMBEDDED_BASE_INSTRUCTIONS: &str = include_str!("../../config/system-prompts/base.md");
+
+/// File name of the base instructions inside the system-prompts root.
+const BASE_INSTRUCTIONS_FILE: &str = "base.md";
+
+/// Structural tokens the citation parser and the chat normalisers rely
+/// on. An edited `base.md` missing any of them is rejected in favour of
+/// the embedded copy, so a prompt edit can't silently break citations,
+/// workflows or DOCX templates.
+pub const REQUIRED_BASE_TOKENS: &[&str] = &[
+    "[c1]",
+    "<CITATIONS>",
+    "</CITATIONS>",
+    "[[PAGE_BREAK]]",
+    "doc-N",
+    "[Workflow: <titolo> (id: <id>)]",
+    "[Template: <titolo> (id: <id>)]",
+    "read_workflow",
+    "describe_docx_template",
+    "generate_docx",
+    "edit_document",
+    "generate_xlsx",
+];
+
+/// Base instructions for every chat turn: `base.md` from the
+/// system-prompts root when present and valid, otherwise the copy
+/// embedded at build time. Read on each call so an edited file takes
+/// effect on the next message without rebuilding.
+pub fn base_instructions() -> String {
+    let path = root_dir().join(BASE_INSTRUCTIONS_FILE);
+    let on_disk = match std::fs::read_to_string(&path) {
+        Ok(text) => Some(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+        Err(e) => {
+            tracing::warn!("[system-prompts] failed to read {}: {e}", path.display());
+            None
+        }
+    };
+    select_base_instructions(on_disk)
+}
+
+fn select_base_instructions(on_disk: Option<String>) -> String {
+    if let Some(text) = on_disk {
+        let text = text.trim();
+        let missing: Vec<&str> = REQUIRED_BASE_TOKENS
+            .iter()
+            .copied()
+            .filter(|token| !text.contains(token))
+            .collect();
+        if !text.is_empty() && missing.is_empty() {
+            return text.to_string();
+        }
+        tracing::warn!(
+            "[system-prompts] {BASE_INSTRUCTIONS_FILE} ignored (empty or missing tokens {missing:?}); using the built-in copy"
+        );
+    }
+    EMBEDDED_BASE_INSTRUCTIONS.trim().to_string()
+}
+
+/// Map a UI / chat locale to its conventional default country, in
+/// Italian like the rest of the prologue (`Paese predefinito: Italia`),
+/// so the model knows what jurisdiction to assume absent explicit
+/// signals. The English mapping is intentionally vague because the en
+/// locale legitimately spans US / UK / IE / AU / CA / NZ / IN.
 pub fn default_country_for_locale(locale: &str) -> &'static str {
     match locale {
-        "it" => "Italy",
-        "fr" => "France",
-        "de" => "Germany",
-        "es" => "Spain",
-        "pt" => "Portugal",
-        _ => "unspecified (ask the user)",
+        "it" => "Italia",
+        "fr" => "Francia",
+        "de" => "Germania",
+        "es" => "Spagna",
+        "pt" => "Portogallo",
+        _ => "non specificato (chiedilo all'utente)",
+    }
+}
+
+/// Italian name of the working language, for the prologue.
+fn italian_language_name_for_locale(locale: &str) -> &'static str {
+    match locale {
+        "it" => "italiano",
+        "fr" => "francese",
+        "de" => "tedesco",
+        "es" => "spagnolo",
+        "pt" => "portoghese",
+        _ => "inglese",
     }
 }
 
@@ -130,37 +205,40 @@ pub fn language_name_for_locale(locale: &str) -> &'static str {
 }
 
 /// Assemble the full prologue section that gets prepended to
-/// `MRUST_SYSTEM_PROMPT`. Wraps the per-domain `.md` body in a
+/// the base chat instructions. Wraps the per-domain `.md` body in a
 /// metadata header (Domain / Working language / Default country) and
 /// a country-disambiguation reminder. Returns an empty string when
 /// nothing meaningful can be assembled (no `.md` found AND no domain
 /// known) — the caller then skips the section entirely.
 pub fn assemble_prologue(locale: &str, domain: &str) -> String {
     let body = resolve(locale, domain).unwrap_or_default();
-    let lang = language_name_for_locale(locale);
+    let lang = italian_language_name_for_locale(locale);
     let country = default_country_for_locale(locale);
     let mut out = String::new();
     out.push_str(
-        "=== Domain context (read this first, it sets your role for this chat) ===\n",
+        "=== Contesto del dominio (leggilo per primo: definisce il tuo ruolo in questa chat) ===\n",
     );
-    out.push_str(&format!("Domain: {domain}\n"));
-    out.push_str(&format!("Working language: {lang}\n"));
-    out.push_str(&format!("Default country / jurisdiction: {country}\n\n"));
+    out.push_str(&format!("Dominio: {domain}\n"));
+    out.push_str(&format!(
+        "Lingua di lavoro: {lang} (predefinita solo se la lingua dell'utente non è chiara: \
+         la risposta segue sempre la lingua dell'ultimo messaggio dell'utente)\n"
+    ));
+    out.push_str(&format!("Paese / giurisdizione predefiniti: {country}\n\n"));
     if body.is_empty() {
         out.push_str(
-            "No domain-specific guidance is available; behave as a generic professional \
-             assistant for this vertical. Cite sources when relevant, defer to the user on \
-             jurisdiction-specific decisions.\n",
+            "Non sono disponibili indicazioni specifiche per questo dominio: comportati da \
+             assistente professionale generico del settore, cita le fonti quando pertinente e \
+             lascia all'utente le scelte che dipendono dalla giurisdizione.\n",
         );
     } else {
         out.push_str(&body);
         out.push('\n');
     }
     out.push_str(
-        "\nCountry disambiguation: If the user's request involves a country, regulation, \
-         or legal/medical/professional framework that does not match the default above, \
-         ASK the user which country / jurisdiction applies BEFORE giving jurisdiction-\
-         specific advice. Do not silently assume.\n",
+        "\nGiurisdizione: se la richiesta riguarda un paese, una normativa o un quadro \
+         legale, medico o professionale diverso da quello predefinito indicato sopra, \
+         CHIEDI all'utente quale paese o giurisdizione si applica PRIMA di dare indicazioni \
+         che ne dipendono. Non dare nulla per scontato.\n",
     );
     out
 }
@@ -212,20 +290,35 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    fn make_tree(files: &[(&str, &str, &str)]) -> TempDir {
+    /// The fixture points the resolver at a temp tree through a
+    /// process-wide env var, so two fixtures cannot be installed at the
+    /// same time. `cargo test` runs tests in parallel threads, so each
+    /// test holds this lock for as long as its tree must stay in place.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Temp tree + the lock that keeps it the only one installed. Kept
+    /// alive by the `let _tmp = …` binding in each test.
+    struct Fixture {
+        _tmp: TempDir,
+        _guard: std::sync::MutexGuard<'static, ()>,
+    }
+
+    fn make_tree(files: &[(&str, &str, &str)]) -> Fixture {
+        // A panicking test poisons the lock; the env var is rewritten
+        // below anyway, so the poison carries no stale state.
+        let guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let tmp = TempDir::new().unwrap();
         for (locale, domain, body) in files {
             let dir = tmp.path().join(locale);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join(format!("{domain}.md")), body).unwrap();
         }
-        // SAFETY: tests run sequentially via `cargo test`'s default
-        // thread model; the env-var nudge here is observed only by the
-        // child resolver call inside this same test.
+        // SAFETY: `ENV_LOCK` makes this the only fixture writing the
+        // variable, and no other thread in this binary reads it.
         unsafe {
-            std::env::set_var("MRUST_SYSTEM_PROMPTS_DIR", tmp.path());
+            std::env::set_var(crate::product::env_var_name("SYSTEM_PROMPTS_DIR"), tmp.path());
         }
-        tmp
+        Fixture { _tmp: tmp, _guard: guard }
     }
 
     #[test]
@@ -266,29 +359,61 @@ mod tests {
     fn assemble_prologue_wraps_body() {
         let _tmp = make_tree(&[("it", "medical", "BODY")]);
         let p = assemble_prologue("it", "medical");
-        assert!(p.contains("Domain: medical"));
-        assert!(p.contains("Working language: Italian"));
-        assert!(p.contains("Default country / jurisdiction: Italy"));
+        assert!(p.contains("Dominio: medical"));
+        assert!(p.contains("Lingua di lavoro: italiano"));
+        assert!(p.contains("Paese / giurisdizione predefiniti: Italia"));
         assert!(p.contains("BODY"));
-        assert!(p.contains("Country disambiguation"));
+        assert!(p.contains("Giurisdizione:"));
     }
 
     #[test]
     fn assemble_prologue_falls_back_when_md_missing() {
         let _tmp = make_tree(&[("it", "medical", "BODY")]);
         let p = assemble_prologue("it", "ip");
-        assert!(p.contains("Domain: ip"));
-        assert!(p.contains("No domain-specific guidance"));
-        assert!(p.contains("Country disambiguation"));
+        assert!(p.contains("Dominio: ip"));
+        assert!(p.contains("Non sono disponibili indicazioni specifiche"));
+        assert!(p.contains("Giurisdizione:"));
     }
 
     #[test]
     fn default_country_for_locale_known_locales() {
-        assert_eq!(default_country_for_locale("it"), "Italy");
-        assert_eq!(default_country_for_locale("fr"), "France");
-        assert_eq!(default_country_for_locale("de"), "Germany");
-        assert_eq!(default_country_for_locale("es"), "Spain");
-        assert_eq!(default_country_for_locale("pt"), "Portugal");
-        assert!(default_country_for_locale("en").contains("ask"));
+        assert_eq!(default_country_for_locale("it"), "Italia");
+        assert_eq!(default_country_for_locale("fr"), "Francia");
+        assert_eq!(default_country_for_locale("de"), "Germania");
+        assert_eq!(default_country_for_locale("es"), "Spagna");
+        assert_eq!(default_country_for_locale("pt"), "Portogallo");
+        assert!(default_country_for_locale("en").contains("chiedilo"));
+    }
+
+    #[test]
+    fn embedded_base_instructions_carry_every_required_token() {
+        for token in REQUIRED_BASE_TOKENS {
+            assert!(EMBEDDED_BASE_INSTRUCTIONS.contains(token), "token mancante: {token}");
+        }
+    }
+
+    #[test]
+    fn embedded_base_instructions_put_the_reply_language_rule_first() {
+        let rule = EMBEDDED_BASE_INSTRUCTIONS.find("# 0. Lingua della risposta").unwrap();
+        let next = EMBEDDED_BASE_INSTRUCTIONS.find("# 1.").unwrap();
+        assert!(rule < next);
+        assert!(EMBEDDED_BASE_INSTRUCTIONS.contains("Se scrive in inglese rispondi in inglese"));
+        assert!(!EMBEDDED_BASE_INSTRUCTIONS.contains("Mike,"));
+    }
+
+    #[test]
+    fn valid_file_on_disk_wins_over_embedded_copy() {
+        let edited = format!("{}\n\nRegola aggiuntiva di prova.", EMBEDDED_BASE_INSTRUCTIONS);
+        let chosen = select_base_instructions(Some(edited));
+        assert!(chosen.ends_with("Regola aggiuntiva di prova."));
+    }
+
+    #[test]
+    fn broken_or_missing_file_falls_back_to_embedded_copy() {
+        let embedded = EMBEDDED_BASE_INSTRUCTIONS.trim();
+        assert_eq!(select_base_instructions(None), embedded);
+        assert_eq!(select_base_instructions(Some("   ".into())), embedded);
+        let without_citations = EMBEDDED_BASE_INSTRUCTIONS.replace("<CITATIONS>", "<FONTI>");
+        assert_eq!(select_base_instructions(Some(without_citations)), embedded);
     }
 }

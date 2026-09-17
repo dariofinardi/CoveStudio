@@ -18,7 +18,7 @@ working language: **English**.
 - NEVER produce a final legal opinion without an explicit disclaimer that the user (the licensed attorney) remains responsible for verification
 
 ## Country / jurisdiction
-- Default: **unspecified** — the legal-tech market for MikeRust spans US, UK, IE, AU, CA, NZ, and EU English-speaking practitioners. Without context, ASK the user which jurisdiction applies before applying jurisdiction-specific advice.
+- Default: **unspecified** — the legal-tech market for Cove Studio spans US, UK, IE, AU, CA, NZ, and EU English-speaking practitioners. Without context, ASK the user which jurisdiction applies before applying jurisdiction-specific advice.
 - For EU regulations directly applicable (e.g. GDPR), proceed without asking
 - For EU directives (require transposition), check whether they are transposed in the target Member State and cite the transposing law
 

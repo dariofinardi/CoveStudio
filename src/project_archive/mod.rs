@@ -1,12 +1,12 @@
-//! `.mikeprj` — portable project archive for sharing between MikeRust users.
+//! `.coveprj` — portable project archive for sharing between Cove Studio users.
 //!
 //! ## File format (v1)
 //!
-//! A `.mikeprj` is a single binary file with the following layout:
+//! A `.coveprj` is a single binary file with the following layout:
 //!
 //! ```text
 //! ┌────────────────────────┐
-//! │ magic   : "MIKEPRJ\0"  │  8 bytes
+//! │ magic   : "COVEPRJ\0"  │  8 bytes (earlier releases: "MIKEPRJ\0", still read)
 //! │ version : u8           │  1 byte  (currently 1)
 //! │ flags   : u8           │  1 byte  (bit 0 = encrypted)
 //! │ email_h : [u8; 32]     │  SHA-256(normalize(recipient_email))
@@ -31,7 +31,7 @@
 //! ## Sharing model (v1 = "weak email pinning")
 //!
 //! The exporter types the recipient's email; the file is encrypted with a
-//! key derived from that email. On import, the recipient's MikeRust
+//! key derived from that email. On import, the recipient's Cove Studio
 //! checks whether the email associated with their local account hashes
 //! to the same value as the one in the file header. If so, the file is
 //! decrypted; otherwise the import is refused with a clear message.

@@ -40,12 +40,12 @@
     "expand": "Expandir"
   },
   "App": {
-    "title": "MikeRust",
+    "title": "{product}",
     "tagline": "Assistente jurídico de IA local",
-    "versionTooltip": "MikeRust v{version}"
+    "versionTooltip": "{product} v{version}"
   },
   "Login": {
-    "heading": "Iniciar sessão no MikeRust",
+    "heading": "Iniciar sessão no {product}",
     "subheading": "Introduza o seu PIN ou utilize a autenticação biométrica",
     "pinLabel": "PIN",
     "pinPlaceholder": "Introduza o seu PIN",
@@ -61,7 +61,7 @@
     "errorBiometric": "Falha na autenticação biométrica"
   },
   "Signup": {
-    "heading": "Criar a sua conta MikeRust",
+    "heading": "Criar a sua conta {product}",
     "subheading": "Defina um PIN para proteger os seus dados",
     "usernameLabel": "Nome de utilizador",
     "usernamePlaceholder": "Escolha um nome de utilizador",
@@ -88,8 +88,6 @@
     "tabularReviews": "Análises tabulares",
     "docxTemplates": "Modelos DOCX",
     "account": "Conta",
-    "semplifica": "Semplifica s.r.l.",
-    "semplificaTitle": "Abrir semplifica.ai no navegador",
     "recentChats": "Conversas recentes",
     "noChats": "Sem conversas",
     "recentProjects": "Projetos recentes",
@@ -196,7 +194,7 @@
   "ProjectExport": {
     "exportButton": "Exportar projeto",
     "title": "Exportar projeto",
-    "subtitle": "Crie um ficheiro .mikeprj cifrado que o seu colega poderá importar para o MikeRust dele. O ficheiro só pode ser aberto se o destinatário estiver registado com o e-mail indicado abaixo.",
+    "subtitle": "Crie um ficheiro .{projectExt} cifrado que o seu colega poderá importar para o {product} dele. O ficheiro só pode ser aberto se o destinatário estiver registado com o e-mail indicado abaixo.",
     "recipientEmail": "E-mail do destinatário",
     "recipientEmailPlaceholder": "colega@escritorio.com",
     "includeChats": "Incluir histórico de conversas",
@@ -208,8 +206,8 @@
   },
   "ProjectImport": {
     "title": "Importar projeto",
-    "subtitle": "Arraste para aqui um ficheiro .mikeprj que tenha sido partilhado consigo. Será importado como um novo projeto na sua conta.",
-    "dropHint": "Largue aqui o ficheiro .mikeprj",
+    "subtitle": "Arraste para aqui um ficheiro .{projectExt} que tenha sido partilhado consigo. Será importado como um novo projeto na sua conta.",
+    "dropHint": "Largue aqui o ficheiro .{projectExt}",
     "dropping": "A importar…",
     "yourEmail": "O seu e-mail registado",
     "yourEmailHint": "Deve corresponder ao e-mail que o remetente indicou como destinatário ao exportar.",
@@ -853,7 +851,7 @@
     "exportCsv": "Exportar CSV",
     "exportXlsx": "Exportar XLSX",
     "deleteReview": "Eliminar análise",
-    "renameReview": "Renomear análise",
+    "renameReview": "Renomear revisão",
     "rerunCell": "Executar novamente a célula",
     "rerunRow": "Executar novamente a linha",
     "rerunColumn": "Executar novamente a coluna",
@@ -873,7 +871,6 @@
     "selectWorkflowOption": "— selecione um fluxo de trabalho tabular —",
     "pickWorkflowError": "Escolha um fluxo de trabalho tabular.",
     "createdToast": "Revisão criada",
-    "renameReview": "Renomear revisão",
     "renamedToast": "Revisão renomeada",
     "deletedToast": "Revisão eliminada",
     "deleteError": "Não foi possível eliminar a revisão",
@@ -1108,16 +1105,16 @@
   },
   "Boot": {
     "cannotReach": "Não é possível contactar o backend",
-    "cannotReachHint": "Certifique-se de que o backend do MikeRust está em execução. Em desenvolvimento, inicie-o a partir da raiz do repositório com",
-    "connecting": "A ligar ao MikeRust…"
+    "cannotReachHint": "Certifique-se de que o backend do {product} está em execução. Em desenvolvimento, inicie-o a partir da raiz do repositório com",
+    "connecting": "A ligar ao {product}…"
   },
   "Auth": {
     "welcome": "Bem-vindo, {name}",
     "welcomeBack": "Bem-vindo de volta, {name}",
-    "setupTitle": "Bem-vindo ao MikeRust",
+    "setupTitle": "Bem-vindo ao {product}",
     "setupSubtitle": "Crie o seu perfil local. Tudo permanece neste computador.",
     "setupPinNote": "O seu PIN protege o acesso local. Não existe recuperação de palavra-passe — guarde-o em local seguro.",
-    "unlockTitle": "Desbloquear o MikeRust",
+    "unlockTitle": "Desbloquear o {product}",
     "unlockTitleNamed": "Desbloquear, {name}",
     "unlockSubtitle": "Introduza o seu PIN para continuar.",
     "username": "Nome de utilizador",
@@ -1134,7 +1131,7 @@
     "createProfile": "Criar perfil",
     "unlock": "Desbloquear",
     "useBiometric": "Usar desbloqueio biométrico",
-    "biometricReason": "Desbloqueie o MikeRust com a sua biometria",
+    "biometricReason": "Desbloqueie o {product} com a sua biometria",
     "lockout": "Demasiadas tentativas — tente novamente em {secs}s"
   },
   "Ui": {
@@ -1235,6 +1232,24 @@
     "localSecureUninstalledToast": "Modelo removido",
     "localSecureCancelled": "Transferência cancelada",
     "localSecureCancelHint": "Cancelar a transferência em curso",
+    "localSecureMigratedToast": "Modelos locais renomeados ({n})",
+    "localSecureMigrateError": "Não foi possível renomear os modelos locais",
+    "localSecureCleanupTitle": "Remover os modelos com o nome anterior?",
+    "localSecureCleanupMessage": "Os modelos locais estão disponíveis com o novo nome. Remover do Ollama os nomes anteriores ({names})? Os dados do modelo são partilhados: nada será transferido.",
+    "localSecureCleanupReinstallMessage": "Não foi possível renomear {models}. Remover do Ollama as versões com o nome anterior ({names}) e transferi-las novamente?",
+    "localSecureCleanupConfirm": "Remover",
+    "localSecureCleanupKeep": "Manter",
+    "localSecureCleanupDoneToast": "Nomes anteriores removidos",
+    "localSecureCleanupError": "Não foi possível remover os nomes anteriores",
+    "contextWindowLabel": "Janela de contexto: {tokens} tokens",
+    "contextWindowSourceServer": "indicada pelo servidor",
+    "contextWindowSourceServerError": "lida de um erro do servidor",
+    "contextWindowSourceCatalogue": "segundo o catálogo de modelos",
+    "contextWindowSourceDefault": "estimativa, não indicada",
+    "contextWindowModelMax": "máximo do modelo {max}",
+    "contextWindowModelfile": "num_ctx do Modelfile {n}",
+    "contextWindowNotLoaded": "modelo não carregado: o valor real é conhecido na primeira utilização",
+    "contextWindowLoading": "A verificar a janela de contexto…",
     "baseUrl": "URL base",
     "modelRoles": "Funções dos modelos",
     "modelRolesHint": "Que modelo trata de cada tarefa",
@@ -1283,12 +1298,12 @@
     "enabledDomainsError": "Não foi possível atualizar os domínios",
     "atLeastOneDomain": "Pelo menos um domínio deve permanecer ativo",
     "license": "Licença",
-    "licenseIntro": "O MikeRust é software livre distribuído sob a GNU Affero General Public License v3 (AGPL-3.0-only). Pode usá-lo, modificá-lo e redistribuí-lo livremente; se o oferecer como serviço em rede, o código-fonte modificado deve ser disponibilizado aos utilizadores desse serviço.",
+    "licenseIntro": "O {product} é software livre distribuído sob a GNU Affero General Public License v3 (AGPL-3.0-only). Pode usá-lo, modificá-lo e redistribuí-lo livremente; se o oferecer como serviço em rede, o código-fonte modificado deve ser disponibilizado aos utilizadores desse serviço.",
     "licenseSpdx": "Identificador SPDX",
     "licenseFullText": "Texto integral da licença",
     "retrieval": "Recuperação",
     "retrievalTitle": "Recuperação de documentos",
-    "retrievalIntro": "Ajustes de comportamento que alteram a forma como o assistente pesquisa na sua biblioteca durante o chat. Cada um é opt-in e pode ser desativado sem reiniciar o MikeRust.",
+    "retrievalIntro": "Ajustes de comportamento que alteram a forma como o assistente pesquisa na sua biblioteca durante o chat. Cada um é opt-in e pode ser desativado sem reiniciar o {product}.",
     "retrievalHydeLabel": "HyDE — Hypothetical Document Embeddings",
     "retrievalHydeDescription": "Antes de pesquisar, o assistente esboça uma breve pseudo-resposta no registo do domínio ativo (jurídico / médico / finanças / …) e usa-a como segunda sonda. Os dois rankings são fundidos. Ajuda a recuperar passagens formuladas como resposta em vez de como pergunta.",
     "retrievalHydeCost": "Adiciona uma chamada LLM extra por turno de chat. O custo é pago no seu fornecedor ativo (Anthropic / Gemini / OpenAI / local), não na computação local.",
@@ -1326,7 +1341,7 @@
       "acknowledge": "Compreendi, continuar",
       "statusLoading": "A carregar o modelo PII… na primeira execução transfere ~500 MB do HuggingFace e depois inicializa a sessão ONNX.",
       "statusFailed": "Não foi possível carregar o modelo PII",
-      "statusUnavailable": "Proteção PII pedida, mas esta versão do MikeRust foi compilada sem a funcionalidade ner-pii — o documento será enviado sem redação."
+      "statusUnavailable": "Proteção PII pedida, mas esta versão do {product} foi compilada sem a funcionalidade ner-pii — o documento será enviado sem redação."
     }
   },
   "NerStatus": {

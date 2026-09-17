@@ -25,7 +25,7 @@ con l'AI, iterando, affinando. Il template entra in gioco alla fine, quando il c
 > è pronto e devi trasformarlo in un documento stampabile."*
 > — Giovanna Panucci, Gladiatori Digitali
 
-Per la traduzione tecnica nel codice MikeRust: questo documento è la **specifica
+Per la traduzione tecnica nel codice Cove Studio: questo documento è la **specifica
 autoritativa** per i sidecar `config/docx-templates/<domain>/<slug>.json` e per i template
 Word `.dotx` che li accompagnano. Ogni scheda qui sotto corrisponde a un template
 shipped, e ogni `source_reference` nei sidecar punta alla scheda specifica.
@@ -467,7 +467,7 @@ Definire almeno quattro stili personalizzati e salvarli nel template:
 | Citazione | `citation` | (vedi scheda) | -1 pt | Corsivo, rientro 1,5 cm sx | 6 pt |
 | Note piè pagina | `footnote` | (vedi scheda) | 10 pt | Normale | 3 pt |
 
-L'ID canonico (colonna a destra) è quello usato dal renderer MikeRust nelle chiavi
+L'ID canonico (colonna a destra) è quello usato dal renderer Cove Studio nelle chiavi
 JSON; il nome italiano è quello scritto dentro lo styles.xml del `.dotx`.
 
 **3. Intestazione e piè di pagina** (`Inserisci` → `Intestazione`)
@@ -477,7 +477,7 @@ JSON; il nome italiano è quello scritto dentro lo styles.xml del `.dotx`.
 
 **4. Campi variabili** (`Inserisci` → `Parti rapide` → `Campo`)
 I dati che cambiano per ogni documento devono essere campi Word, non testo fisso.
-Sintassi adottata da MikeRust: segnaposto `[NOME_CAMPO]` per mail merge / sostituzione
+Sintassi adottata da Cove Studio: segnaposto `[NOME_CAMPO]` per mail merge / sostituzione
 runtime.
 
 **5. Salvare come `.dotx`** (`File` → `Salva con nome` → `Modello Word`)

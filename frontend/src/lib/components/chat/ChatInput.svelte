@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Chat composer: a textarea plus attachment pickers for documents,
   projects, workflows and templates. On send it emits the message text
@@ -13,6 +13,7 @@
   import type { PickerItem } from '$lib/components/ui/PickerModal.svelte'
   import { i18n } from '$lib/stores/i18n.svelte'
   import { modelsStore } from '$lib/stores/models.svelte'
+  import { userApi } from '$lib/api/user'
   import { composerPrefill } from '$lib/stores/composer.svelte'
   import { documentsApi } from '$lib/api/documents'
   import { openExternal } from '$lib/tauri/commands'
@@ -411,6 +412,23 @@
   )
 
   // ── model picker ────────────────────────────────────────────────────
+  // In secure mode the picker offers only the local-models catalogue,
+  // loaded from the backend (config/local-models/ollama.json).
+  let localCatalogue = $state<{ value: string; label: string }[]>([])
+  let localCatalogueRequested = false
+  $effect(() => {
+    if (!modelsStore.settings.local_secure_mode || localCatalogueRequested) return
+    localCatalogueRequested = true
+    userApi
+      .localSecureModels()
+      .then((r) => {
+        localCatalogue = r.models.map((m) => ({ value: `local:${m.id}`, label: m.display_name }))
+      })
+      .catch(() => {
+        localCatalogueRequested = false
+      })
+  })
+
   $effect(() => {
     if (!modelsStore.catalogue && !modelsStore.loading) void modelsStore.load()
   })
@@ -423,21 +441,14 @@
   // the backend expects. Falls back to every model when no key is visible.
   //
   // v0.5.6 — when `local_secure_mode` is on, the picker collapses to
-  // ONLY the curated mike-…-fast variants. Cloud providers are hidden
+  // ONLY the local-models catalogue. Cloud providers are hidden
   // even if the user has API keys configured: secure mode is an
   // explicit "I want air-gapped" opt-in, not "I have a preference".
   // The user can always flip the toggle off from Settings to get the
   // full picker back.
   const modelOptions = $derived.by(() => {
     const s = modelsStore.settings
-    if (s.local_secure_mode) {
-      // Hard-coded order to keep the lighter Qwen at the top — same as
-      // the curated catalogue in src/llm/ollama_manager.rs CURATED_MODELS.
-      return [
-        { value: 'local:mike-qwen35-4b-fast', label: 'Qwen 3.5 4B (rapido)' },
-        { value: 'local:mike-gemma4-e2b-fast', label: 'Gemma 4 E2B (rapido)' },
-      ]
-    }
+    if (s.local_secure_mode) return localCatalogue
 
     const configured = new Set<string>()
     if (keyset(s.claude_api_key)) configured.add('anthropic')

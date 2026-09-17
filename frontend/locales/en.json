@@ -40,12 +40,12 @@
     "expand": "Expand"
   },
   "App": {
-    "title": "MikeRust",
+    "title": "{product}",
     "tagline": "Local legal AI assistant",
-    "versionTooltip": "MikeRust v{version}"
+    "versionTooltip": "{product} v{version}"
   },
   "Login": {
-    "heading": "Sign in to MikeRust",
+    "heading": "Sign in to {product}",
     "subheading": "Enter your PIN or use biometric authentication",
     "pinLabel": "PIN",
     "pinPlaceholder": "Enter your PIN",
@@ -61,7 +61,7 @@
     "errorBiometric": "Biometric authentication failed"
   },
   "Signup": {
-    "heading": "Create your MikeRust account",
+    "heading": "Create your {product} account",
     "subheading": "Set a PIN to protect your data",
     "usernameLabel": "Username",
     "usernamePlaceholder": "Pick a username",
@@ -88,8 +88,6 @@
     "tabularReviews": "Tabular reviews",
     "docxTemplates": "DOCX templates",
     "account": "Account",
-    "semplifica": "Semplifica s.r.l.",
-    "semplificaTitle": "Open semplifica.ai in your browser",
     "recentChats": "Recent chats",
     "noChats": "No chats",
     "recentProjects": "Recent projects",
@@ -196,7 +194,7 @@
   "ProjectExport": {
     "exportButton": "Export project",
     "title": "Export project",
-    "subtitle": "Create an encrypted .mikeprj file your colleague can import into their MikeRust. The file can only be opened if the recipient is registered with the email below.",
+    "subtitle": "Create an encrypted .{projectExt} file your colleague can import into their {product}. The file can only be opened if the recipient is registered with the email below.",
     "recipientEmail": "Recipient email",
     "recipientEmailPlaceholder": "colleague@firm.com",
     "includeChats": "Include chat history",
@@ -208,8 +206,8 @@
   },
   "ProjectImport": {
     "title": "Import project",
-    "subtitle": "Drop a .mikeprj file shared with you here. It will be imported as a new project under your account.",
-    "dropHint": "Drop the .mikeprj file here",
+    "subtitle": "Drop a .{projectExt} file shared with you here. It will be imported as a new project under your account.",
+    "dropHint": "Drop the .{projectExt} file here",
     "dropping": "Importing…",
     "yourEmail": "Your registered email",
     "yourEmailHint": "Must match the email the sender entered as the recipient when exporting.",
@@ -552,7 +550,7 @@
       "acknowledge": "I understand, continue",
       "statusLoading": "Loading PII model… first run downloads ~500 MB from HuggingFace, then loads the ONNX session.",
       "statusFailed": "Could not load the PII model",
-      "statusUnavailable": "PII protection requested but this build of MikeRust was compiled without the ner-pii feature — the document will be sent unredacted."
+      "statusUnavailable": "PII protection requested but this build of {product} was compiled without the ner-pii feature — the document will be sent unredacted."
     }
   },
   "DocViewer": {
@@ -1023,7 +1021,6 @@
     "selectWorkflowOption": "— select a tabular workflow —",
     "pickWorkflowError": "Pick a tabular workflow.",
     "createdToast": "Review created",
-    "renameReview": "Rename review",
     "renamedToast": "Review renamed",
     "deletedToast": "Review deleted",
     "deleteError": "Could not delete review",
@@ -1126,16 +1123,16 @@
   },
   "Boot": {
     "cannotReach": "Cannot reach the backend",
-    "cannotReachHint": "Make sure the MikeRust backend is running. In dev, launch it from the repo root with",
-    "connecting": "Connecting to MikeRust…"
+    "cannotReachHint": "Make sure the {product} backend is running. In dev, launch it from the repo root with",
+    "connecting": "Connecting to {product}…"
   },
   "Auth": {
     "welcome": "Welcome, {name}",
     "welcomeBack": "Welcome back, {name}",
-    "setupTitle": "Welcome to MikeRust",
+    "setupTitle": "Welcome to {product}",
     "setupSubtitle": "Create your local profile. Everything stays on this machine.",
     "setupPinNote": "Your PIN protects local access. There is no password recovery — keep it somewhere safe.",
-    "unlockTitle": "Unlock MikeRust",
+    "unlockTitle": "Unlock {product}",
     "unlockTitleNamed": "Unlock, {name}",
     "unlockSubtitle": "Enter your PIN to continue.",
     "username": "Username",
@@ -1152,7 +1149,7 @@
     "createProfile": "Create profile",
     "unlock": "Unlock",
     "useBiometric": "Use biometric unlock",
-    "biometricReason": "Unlock MikeRust with your biometric",
+    "biometricReason": "Unlock {product} with your biometric",
     "lockout": "Too many attempts — retry in {secs}s"
   },
   "Ui": {
@@ -1258,6 +1255,24 @@
     "localSecureUninstalledToast": "Model removed",
     "localSecureCancelled": "Download cancelled",
     "localSecureCancelHint": "Cancel the running download",
+    "localSecureMigratedToast": "Local models moved to the new name ({n})",
+    "localSecureMigrateError": "Could not rename the local models",
+    "localSecureCleanupTitle": "Remove models with the previous name?",
+    "localSecureCleanupMessage": "The local models are available under the new name. Remove the previous names from Ollama ({names})? The model data is shared: nothing will be downloaded.",
+    "localSecureCleanupReinstallMessage": "{models} could not be renamed. Remove the versions with the previous name from Ollama ({names}) and download them again?",
+    "localSecureCleanupConfirm": "Remove",
+    "localSecureCleanupKeep": "Keep",
+    "localSecureCleanupDoneToast": "Previous names removed",
+    "localSecureCleanupError": "Could not remove the previous names",
+    "contextWindowLabel": "Context window: {tokens} tokens",
+    "contextWindowSourceServer": "reported by the server",
+    "contextWindowSourceServerError": "read from a server error",
+    "contextWindowSourceCatalogue": "from the model catalogue",
+    "contextWindowSourceDefault": "estimate, not reported",
+    "contextWindowModelMax": "model maximum {max}",
+    "contextWindowModelfile": "Modelfile num_ctx {n}",
+    "contextWindowNotLoaded": "model not loaded: the actual value is known after first use",
+    "contextWindowLoading": "Checking the context window…",
     "baseUrl": "Base URL",
     "modelRoles": "Model roles",
     "modelRolesHint": "Which model handles each task",
@@ -1301,12 +1316,12 @@
     "pinResetReason": "Verify your identity to reset your PIN",
     "pinResetHint": "If you don't remember your current PIN, you can set a new one by verifying with Windows Hello / Touch ID.",
     "license": "License",
-    "licenseIntro": "MikeRust is free software distributed under the GNU Affero General Public License v3 (AGPL-3.0-only). You can use, modify and redistribute it freely; if you offer it as a network service, the modified source code must be made available to the users of that service.",
+    "licenseIntro": "{product} is free software distributed under the GNU Affero General Public License v3 (AGPL-3.0-only). You can use, modify and redistribute it freely; if you offer it as a network service, the modified source code must be made available to the users of that service.",
     "licenseSpdx": "SPDX identifier",
     "licenseFullText": "Full license text",
     "retrieval": "Retrieval",
     "retrievalTitle": "Document retrieval",
-    "retrievalIntro": "Behavioural knobs that change how the assistant searches your library at chat time. Each one is opt-in and can be turned off without restarting MikeRust.",
+    "retrievalIntro": "Behavioural knobs that change how the assistant searches your library at chat time. Each one is opt-in and can be turned off without restarting {product}.",
     "retrievalHydeLabel": "HyDE — Hypothetical Document Embeddings",
     "retrievalHydeDescription": "Before searching, the assistant drafts a short pseudo-answer in the register of the active domain (legal / medical / finance / …) and uses it as a second probe. The two rankings are merged. Tends to recover passages that match the answer's phrasing rather than the question's.",
     "retrievalHydeCost": "Adds one extra LLM call per chat turn. Cost is paid on your active provider (Anthropic / Gemini / OpenAI / local), not local compute.",

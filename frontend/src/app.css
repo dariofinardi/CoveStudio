@@ -1,4 +1,4 @@
-/* Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. */
+/* Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. */
 
 @import "tailwindcss";
 
@@ -219,7 +219,7 @@ summary {
   50% { opacity: 0; }
 }
 
-/* ── MikeRust logo ───────────────────────────────────────────────── */
+/* ── Product logo ───────────────────────────────────────────────── */
 
 /* Hide the native scrollbar on horizontally-scrolled strips. */
 .no-scrollbar { scrollbar-width: none; }
@@ -250,78 +250,29 @@ summary {
   background: transparent;
 }
 
-.mike-logo-cell {
+.app-logo { color: var(--color-text-primary); }
+.app-logo-thinking { color: var(--color-brand-600); }
+.app-logo-docx { color: #2563eb; }
+.app-logo-upload { color: var(--color-success-500); }
+
+.app-logo-module {
   transform-box: fill-box;
   transform-origin: center;
 }
-/*
- * Seven-state choreography over a single 3.2s cycle. All transitions
- * are ease-in-out and span ~450ms each — smooth pulse, no flash.
- * The wave now includes the rest cells (1,2,3,4,7) so the loop
- * passes through a "full 3×3 shrunk" beat at the midpoint.
- *
- *  state 0%   — tutti                          all cells full size
- *  state 14%  — shrink corner                  only cell 9 shrunk
- *  state 28%  — shrink quad                    cells 5,6,8,9 shrunk
- *  state 42%  — shrink rest = full 3×3 small   all nine shrunk
- *  state 56%  — restore rest                   1,2,3,4,7 full; quad+9 still small
- *  state 70%  — restore quad                   5,6,8 full; 9 still small
- *  state 84%  — restore corner = back to tutti
- *  state 100% — hold tutti, loop
- *
- * Each keyframe is a stable plateau between transitions; ease-in-out
- * makes the move into and out of every plateau gentle.
- */
-.mike-logo-thinking .mike-logo-tier-corner,
-.mike-logo-docx     .mike-logo-tier-corner,
-.mike-logo-upload   .mike-logo-tier-corner {
-  animation: mike-logo-pulse-corner 3.2s ease-in-out infinite;
+/* Assembly loop of the mark: each module fades and scales in, holds,
+ * then fades out; per-module delays follow the diagonal of the channel. */
+.app-logo-thinking .app-logo-module,
+.app-logo-docx .app-logo-module,
+.app-logo-upload .app-logo-module {
+  animation: app-logo-assemble 3.6s ease-in-out infinite;
 }
-.mike-logo-thinking .mike-logo-tier-quad,
-.mike-logo-docx     .mike-logo-tier-quad,
-.mike-logo-upload   .mike-logo-tier-quad {
-  animation: mike-logo-pulse-quad   3.2s ease-in-out infinite;
+@keyframes app-logo-assemble {
+  0%, 4%   { opacity: 0; transform: scale(0.35); }
+  18%, 84% { opacity: 1; transform: scale(1); }
+  100%     { opacity: 0; transform: scale(0.35); }
 }
-.mike-logo-thinking .mike-logo-tier-rest,
-.mike-logo-docx     .mike-logo-tier-rest,
-.mike-logo-upload   .mike-logo-tier-rest {
-  animation: mike-logo-pulse-rest   3.2s ease-in-out infinite;
-}
-/* Cell 9 (corner) — leading edge: shrinks first, stays small longest,
- * restores last. Outside [14% … 84%] it is back at full size. */
-@keyframes mike-logo-pulse-corner {
-  0%   { transform: scale(1); }
-  14%  { transform: scale(0.78); }
-  84%  { transform: scale(0.78); }
-  100% { transform: scale(1); }
-}
-/* Cells 5, 6, 8 (quad without corner) — second wave: small while the
- * full 3×3 contracts around it, then restored before the corner. */
-@keyframes mike-logo-pulse-quad {
-  0%   { transform: scale(1); }
-  14%  { transform: scale(1); }
-  28%  { transform: scale(0.78); }
-  70%  { transform: scale(0.78); }
-  84%  { transform: scale(1); }
-  100% { transform: scale(1); }
-}
-/* Cells 1, 2, 3, 4, 7 (rest) — innermost wave: only shrunk at the
- * midpoint so the full 3×3 reads as a single coordinated pulse. */
-@keyframes mike-logo-pulse-rest {
-  0%   { transform: scale(1); }
-  28%  { transform: scale(1); }
-  42%  { transform: scale(0.78); }
-  56%  { transform: scale(0.78); }
-  70%  { transform: scale(1); }
-  100% { transform: scale(1); }
-}
-/* Activity colour: rust (default) → blue (docx) → green (upload). */
-.mike-logo-docx { filter: hue-rotate(198deg) saturate(1.05); }
-.mike-logo-upload { filter: hue-rotate(95deg) saturate(0.95); }
 @media (prefers-reduced-motion: reduce) {
-  .mike-logo-tier-corner,
-  .mike-logo-tier-quad,
-  .mike-logo-tier-rest { animation: none; }
+  .app-logo-module { animation: none !important; opacity: 1; transform: none; }
 }
 
 /* ── Citation pills ──────────────────────────────────────────────── */

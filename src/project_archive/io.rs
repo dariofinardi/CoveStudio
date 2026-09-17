@@ -1,4 +1,4 @@
-//! `.mikeprj` build / parse pipeline.
+//! `.coveprj` build / parse pipeline.
 //!
 //! Splits the work in two layers so the route handlers stay small:
 //!
@@ -242,7 +242,7 @@ pub async fn build_payload(
 
     let manifest = Manifest {
         schema_version: SCHEMA_VERSION,
-        exporter: format!("MikeRust {}", env!("CARGO_PKG_VERSION")),
+        exporter: format!("{} {}", crate::product::NAME, env!("CARGO_PKG_VERSION")),
         exported_at: Utc::now().to_rfc3339(),
         exported_by_display_name: None,
         contents: ManifestContents {
@@ -266,7 +266,7 @@ pub async fn build_payload(
 }
 
 /// Serialise a `Payload` as a ZIP archive (the bytes that go into
-/// `crypto::seal`). Layout matches the spec in `mikeprj/mod.rs`.
+/// `crypto::seal`). Layout matches the spec in `project_archive/mod.rs`.
 pub fn zip_payload(payload: &Payload) -> Result<Vec<u8>> {
     let mut buf = Cursor::new(Vec::with_capacity(64 * 1024));
     {
@@ -305,8 +305,10 @@ pub fn zip_payload(payload: &Payload) -> Result<Vec<u8>> {
         // Friendly README so the file isn't completely opaque to anyone
         // who unzips it manually (e.g. forensic recovery).
         z.start_file("README.txt", opts)?;
-        z.write_all(b"This is a MikeRust project archive (.mikeprj).\n")?;
-        z.write_all(b"It is meant to be imported via the MikeRust UI.\n")?;
+        let name = crate::product::NAME;
+        let ext = crate::product::PROJECT_FILE_EXTENSION;
+        z.write_all(format!("This is a {name} project archive (.{ext}).\n").as_bytes())?;
+        z.write_all(format!("It is meant to be imported via the {name} UI.\n").as_bytes())?;
         z.write_all(b"Manual extraction is supported but you'll lose the citation links.\n")?;
 
         z.finish()?;
@@ -334,7 +336,7 @@ pub fn unzip_payload(zip_bytes: &[u8]) -> Result<Payload> {
     let manifest: Manifest = read_json(&mut zip, "manifest.json")?;
     if manifest.schema_version != SCHEMA_VERSION {
         return Err(anyhow!(
-            "unsupported .mikeprj schema_version {}; this build expects {}",
+            "unsupported project file schema_version {}; this build expects {}",
             manifest.schema_version,
             SCHEMA_VERSION
         ));

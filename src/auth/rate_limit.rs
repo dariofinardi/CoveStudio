@@ -26,7 +26,7 @@
 //! - Not a distributed rate limit. Counter lives in-process; restart
 //!   resets it. Acceptable for a single-instance local-only app.
 //! - Not a DoS shield. A flooder can spawn many IPs (NAT'd or otherwise);
-//!   that's an external problem (firewall, ufw). Mike's goal here is
+//!   that's an external problem (firewall, ufw). The goal here is
 //!   *credential* protection, not connection-level fairness.
 //! - Not a replacement for stronger PINs. 6+ digits + this lockout
 //!   beats 4-digit + lockout by orders of magnitude.

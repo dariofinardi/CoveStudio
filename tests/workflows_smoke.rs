@@ -9,7 +9,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode},
 };
-use mike::AppState;
+use cove_studio::AppState;
 use serde_json::{json, Value};
 use sqlx::sqlite::SqlitePoolOptions;
 use std::sync::Arc;
@@ -24,7 +24,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
     let url = format!("sqlite://{}?mode=rwc", db_path.display().to_string().replace('\\', "/"));
 
     #[cfg(feature = "rag")]
-    mike::embeddings::register_sqlite_vec_auto_extension();
+    cove_studio::embeddings::register_sqlite_vec_auto_extension();
 
     let pool = SqlitePoolOptions::new()
         .max_connections(2)
@@ -38,7 +38,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
         .expect("migrate");
 
     // Hand-build an AppState that owns the same pool.
-    let sessions = mike::auth::SessionStore::new(pool.clone());
+    let sessions = cove_studio::auth::SessionStore::new(pool.clone());
     let state = AppState {
         db: pool,
         sessions,
@@ -54,7 +54,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
         corpus_import_progress: Default::default(),
         workflow_presets: Default::default(),
         column_presets: Default::default(),
-        model_catalogue: Arc::new(mike::presets::model::ModelCatalogue {
+        model_catalogue: Arc::new(cove_studio::presets::model::ModelCatalogue {
             schema_version: 1,
             providers: vec![],
         }),
@@ -63,7 +63,7 @@ async fn fresh_app() -> (axum::Router, Arc<AppState>) {
     let state = Arc::new(state);
 
     let app = axum::Router::new()
-        .nest("/workflow", mike::routes::workflows::router())
+        .nest("/workflow", cove_studio::routes::workflows::router())
         .with_state(state.clone());
 
     // Tempdir must outlive the test — leak it for the duration.

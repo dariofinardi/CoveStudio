@@ -1,4 +1,4 @@
-<!-- Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only. -->
+<!-- Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only. -->
 <!--
   Settings → LLM models. Catalogue-driven (GET /models) editor over the
   user's LlmSettings. Four configurable providers (Anthropic, Google,
@@ -63,6 +63,7 @@
 </script>
 
 <script lang="ts">
+  import { readLocalPreference, writeLocalPreference } from '$lib/product'
   import Card from '$lib/components/ui/Card.svelte'
   import Input from '$lib/components/ui/Input.svelte'
   import Select from '$lib/components/ui/Select.svelte'
@@ -72,6 +73,8 @@
   import ChipGroup from '$lib/components/ui/ChipGroup.svelte'
   import EmptyState from '$lib/components/ui/EmptyState.svelte'
   import Toggle from '$lib/components/ui/Toggle.svelte'
+  import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte'
+  import ContextWindowHint from './ContextWindowHint.svelte'
   import { modelsStore } from '$lib/stores/models.svelte'
   import { toastStore } from '$lib/stores/toast.svelte'
   import { i18n } from '$lib/stores/i18n.svelte'
@@ -89,7 +92,7 @@
   let localModelsLoading = $state(false)
 
   let localFetchSeq = 0
-  const ACTIVE_PROVIDERS_STORAGE_KEY = 'mikerust.settings.activeProviders.v1'
+  const ACTIVE_PROVIDERS_PREFERENCE = 'settings.activeProviders.v1'
 
   function isProviderId(v: string): v is LlmProvider {
     return ['anthropic', 'google', 'openai', 'mistral', 'local'].includes(v)
@@ -98,7 +101,7 @@
   function readPersistedActiveProviders(): string[] {
     if (typeof window === 'undefined') return []
     try {
-      const raw = window.localStorage.getItem(ACTIVE_PROVIDERS_STORAGE_KEY)
+      const raw = readLocalPreference(ACTIVE_PROVIDERS_PREFERENCE)
       if (!raw) return []
       const parsed = JSON.parse(raw)
       if (!Array.isArray(parsed)) return []
@@ -110,11 +113,7 @@
 
   function writePersistedActiveProviders(v: string[]) {
     if (typeof window === 'undefined') return
-    try {
-      window.localStorage.setItem(ACTIVE_PROVIDERS_STORAGE_KEY, JSON.stringify(v))
-    } catch {
-      // no-op (private mode / quota)
-    }
+    writeLocalPreference(ACTIVE_PROVIDERS_PREFERENCE, JSON.stringify(v))
   }
 
   function setActiveProvidersUi(v: string[]) {
@@ -151,7 +150,7 @@
     localModelsLoading = true
 
     try {
-      // Route the model-list probe through MikeRust's own backend
+      // Route the model-list probe through Cove Studio's own backend
       // instead of `fetch` against the Ollama / llama-server URL
       // directly. The WebView origin is `http://tauri.localhost`, and
       // external OpenAI-compatible runtimes rarely advertise that
@@ -341,6 +340,9 @@
       secureOllamaRunning = hb.ollama_running
       const m = await userApi.localSecureModels()
       secureModels = m.models
+      if (m.models.some((x) => x.legacy_installed.length > 0)) {
+        void migrateLegacyModels()
+      }
     } catch (e) {
       secureOllamaRunning = false
       toastStore.danger(i18n.t('Settings.localSecureLoadError'), {
@@ -390,6 +392,88 @@
         })
       },
     })
+  }
+
+  // ── Models installed under names from earlier releases ────────────
+  // Renaming is a copy in Ollama (no download, nothing deleted) and runs
+  // on its own. Removing the previous names, or reinstalling a model that
+  // could not be copied, happens only after the user confirms.
+  let legacyMigrationStarted = false
+  let legacyNamesToRemove = $state<string[]>([])
+  let modelsToReinstall = $state<string[]>([])
+  let legacyDialogOpen = $state(false)
+
+  const legacyDialogMessage = $derived(
+    modelsToReinstall.length > 0
+      ? i18n.t('Settings.localSecureCleanupReinstallMessage', {
+          models: modelsToReinstall.map(displayNameOf).join(', '),
+          names: legacyNamesToRemove.join(', '),
+        })
+      : i18n.t('Settings.localSecureCleanupMessage', { names: legacyNamesToRemove.join(', ') }),
+  )
+
+  function displayNameOf(modelId: string): string {
+    return secureModels.find((m) => m.id === modelId)?.display_name ?? modelId
+  }
+
+  function sameModelName(value: string, name: string): boolean {
+    const bare = name.replace(/:latest$/, '')
+    return value === bare || value === `${bare}:latest`
+  }
+
+  /** Mirror the backend settings update in the open form, so a later
+   *  "Salva" doesn't write the previous names back. */
+  function renameInForm(from: string, to: string) {
+    if (sameModelName(form.local_model, from)) form.local_model = to
+    for (const key of ['main_model', 'title_model', 'tabular_model'] as const) {
+      if (form[key].startsWith('local:') && sameModelName(form[key].slice(6), from)) {
+        form[key] = `local:${to}`
+      }
+    }
+  }
+
+  async function migrateLegacyModels() {
+    if (legacyMigrationStarted) return
+    legacyMigrationStarted = true
+    try {
+      const report = await userApi.localSecureMigrate()
+      for (const r of report.migrated) renameInForm(r.from, r.to)
+      if (report.migrated.length > 0) {
+        await modelsStore.load()
+        toastStore.success(i18n.t('Settings.localSecureMigratedToast', { n: report.migrated.length }))
+      }
+      legacyNamesToRemove = [...report.leftovers, ...report.failed.map((f) => f.from)]
+      modelsToReinstall = [...new Set(report.failed.map((f) => f.to))]
+      legacyDialogOpen = legacyNamesToRemove.length > 0
+      const m = await userApi.localSecureModels()
+      secureModels = m.models
+    } catch (e) {
+      toastStore.danger(i18n.t('Settings.localSecureMigrateError'), {
+        detail: (e as Error).message,
+      })
+    }
+  }
+
+  async function removeLegacyModels() {
+    try {
+      await userApi.localSecureRemoveLegacy(legacyNamesToRemove)
+      toastStore.success(i18n.t('Settings.localSecureCleanupDoneToast'))
+    } catch (e) {
+      toastStore.danger(i18n.t('Settings.localSecureCleanupError'), {
+        detail: (e as Error).message,
+      })
+      return
+    }
+    const reinstall = modelsToReinstall
+    legacyNamesToRemove = []
+    modelsToReinstall = []
+    legacyDialogOpen = false
+    await refreshSecureCatalogue()
+    for (const id of reinstall) void installSecure(id)
+  }
+
+  function keepLegacyModels() {
+    legacyDialogOpen = false
   }
 
   function cancelInstall(modelId: string) {
@@ -730,6 +814,13 @@
             bind:value={form.local_api_key}
             autocomplete="off"
           />
+          {#if form.local_model.trim()}
+            <ContextWindowHint
+              model={`local:${form.local_model.trim()}`}
+              baseUrl={form.local_base_url}
+              secure={false}
+            />
+          {/if}
         {/if}
       </div>
     </Card>
@@ -950,9 +1041,18 @@
 
     <Card title={i18n.t('Settings.modelRoles')} subtitle={i18n.t('Settings.modelRolesHint')}>
       <div class="grid grid-cols-3 gap-3">
-        <Select label={i18n.t('Settings.roleMain')} options={roleOptions} bind:value={form.main_model} />
-        <Select label={i18n.t('Settings.roleTitles')} options={roleOptions} bind:value={form.title_model} />
-        <Select label={i18n.t('Settings.roleTabular')} options={roleOptions} bind:value={form.tabular_model} />
+        <div>
+          <Select label={i18n.t('Settings.roleMain')} options={roleOptions} bind:value={form.main_model} />
+          <ContextWindowHint model={form.main_model} baseUrl={form.local_base_url} secure={form.local_secure_mode} />
+        </div>
+        <div>
+          <Select label={i18n.t('Settings.roleTitles')} options={roleOptions} bind:value={form.title_model} />
+          <ContextWindowHint model={form.title_model} baseUrl={form.local_base_url} secure={form.local_secure_mode} />
+        </div>
+        <div>
+          <Select label={i18n.t('Settings.roleTabular')} options={roleOptions} bind:value={form.tabular_model} />
+          <ContextWindowHint model={form.tabular_model} baseUrl={form.local_base_url} secure={form.local_secure_mode} />
+        </div>
       </div>
     </Card>
 
@@ -963,3 +1063,14 @@
     </div>
   </div>
 {/if}
+
+<ConfirmDialog
+  bind:open={legacyDialogOpen}
+  title={i18n.t('Settings.localSecureCleanupTitle')}
+  message={legacyDialogMessage}
+  confirmLabel={i18n.t('Settings.localSecureCleanupConfirm')}
+  cancelLabel={i18n.t('Settings.localSecureCleanupKeep')}
+  danger
+  onconfirm={removeLegacyModels}
+  oncancel={keepLegacyModels}
+/>

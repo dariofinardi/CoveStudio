@@ -1,7 +1,7 @@
 //! `/sync` routes — folder configuration, scan trigger, status.
 //!
 //! All endpoints require an authenticated user. The vector store and
-//! folder records are user-scoped: the same MikeRust install can host
+//! folder records are user-scoped: the same Cove Studio install can host
 //! multiple users with separate Lance databases under
 //! `<storage>/lance/<user_id>/`.
 

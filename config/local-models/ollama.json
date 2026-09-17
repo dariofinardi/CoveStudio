@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "description": "Modelli locali per la Modalità sicura locale. Ogni voce è una derivazione Ollama creata dall'app sopra un modello base; legacy_ids elenca i nomi usati da versioni precedenti, che vengono migrati al nome attuale. renamed_aliases elenca altri alias Ollama rinominati (profili di contesto di config/model.json), migrati allo stesso modo.",
+  "models": [
+    {
+      "id": "covestudio-qwen35-4b-fast",
+      "legacy_ids": [
+        "mike-qwen35-4b-fast"
+      ],
+      "base_model": "qwen2.5:3b-instruct-q4_K_M",
+      "display_name": "Qwen 3.5 4B (rapido)",
+      "approx_size_gb": 2.5,
+      "min_ram_gb": 8,
+      "modelfile": {
+        "template": "{{ if .System }}<|im_start|>system\n{{ .System }}<|im_end|>\n{{ end }}{{ range .Messages }}<|im_start|>{{ .Role }}\n{{ .Content }}/no_think<|im_end|>\n{{ end }}<|im_start|>assistant\n",
+        "temperature": 0.5,
+        "num_predict": 2048
+      }
+    },
+    {
+      "id": "covestudio-gemma4-e2b-fast",
+      "legacy_ids": [
+        "mike-gemma4-e2b-fast"
+      ],
+      "base_model": "hf.co/unsloth/gemma-4-E2B-it-GGUF:Q4_K_M",
+      "display_name": "Gemma 4 E2B (rapido)",
+      "approx_size_gb": 3.1,
+      "min_ram_gb": 12,
+      "modelfile": {
+        "system": "Rispondi sempre in modo diretto e conciso, nella lingua dell'utente. Non includere ragionamento esplicito tra <think>, <thinking>, <reasoning> o blocchi simili. Vai direttamente alla risposta finale.",
+        "stop": [
+          "<think>",
+          "<thinking>",
+          "<reasoning>"
+        ],
+        "temperature": 0.5,
+        "num_predict": 2048
+      }
+    }
+  ],
+  "renamed_aliases": [
+    {
+      "from": "mikerust-qwen35-4b:ctx16k",
+      "to": "covestudio-qwen35-4b:ctx16k"
+    },
+    {
+      "from": "mikerust-qwen35-9b:ctx8k",
+      "to": "covestudio-qwen35-9b:ctx8k"
+    },
+    {
+      "from": "mikerust-gemma4-e2b:ctx8k",
+      "to": "covestudio-gemma4-e2b:ctx8k"
+    }
+  ]
+}

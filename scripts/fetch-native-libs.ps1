@@ -1,8 +1,8 @@
-# Copyright (c) 2026 MikeRust contributors. Licensed under AGPL-3.0-only.
+# Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
 #requires -Version 5.1
 <#
 .SYNOPSIS
-  Download the native runtime DLLs MikeRust depends on (onnxruntime
+  Download the native runtime DLLs Cove Studio depends on (onnxruntime
   and pdfium) for Windows x86_64 and ARM64, and place them under
   `libs/<lib>/win-<arch>/`.
 
@@ -73,7 +73,7 @@ $doPdfium = (-not $Onnxruntime) -or $Pdfium
 
 $arches = if ($Arch -eq 'both') { @('x64', 'arm64') } else { @($Arch) }
 
-$work = Join-Path $env:TEMP ("mike-fetch-{0}" -f ([guid]::NewGuid().ToString('N').Substring(0, 8)))
+$work = Join-Path $env:TEMP ("covestudio-fetch-{0}" -f ([guid]::NewGuid().ToString('N').Substring(0, 8)))
 New-Item -ItemType Directory -Path $work -Force | Out-Null
 Write-Host "Scratch dir: $work" -ForegroundColor DarkGray
 
@@ -82,7 +82,7 @@ function Save-Download {
     Write-Host "  GET $Url" -ForegroundColor DarkGray
     # Stable UA + TLS 1.2: GitHub redirects sometimes 403 the PS default UA.
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -UserAgent 'MikeRust-fetch/1.0'
+    Invoke-WebRequest -Uri $Url -OutFile $Dest -UseBasicParsing -UserAgent 'covestudio-fetch/1.0'
 }
 
 function Move-Atomic {
