@@ -197,6 +197,13 @@ bundle the application with the matching `onnxruntime.dll` (1.20.0) and
 `pdfium.dll`. Releases are published on
 [GitHub Releases](https://github.com/dariofinardi/CoveStudio/releases).
 
+The installers are signed with Azure Trusted Signing, so Windows shows a
+verified publisher instead of an unknown-publisher warning. The
+certificate belongs to **Jugaad srl**, which provides the signing
+infrastructure (see *Acknowledgements*); the publisher name you see at
+install time is therefore Jugaad srl, while the copyright and the
+maintenance of the project are Dario Finardi's.
+
 ## Building from source
 
 ```bash
@@ -327,6 +334,15 @@ Every `COVE_` variable is also read under the former `MRUST_` prefix.
 - [docs/CORPUS_PLUGINS.md](docs/CORPUS_PLUGINS.md), [docs/CORPORA.md](docs/CORPORA.md) — corpora
 - [docs/DOCX.md](docs/DOCX.md), [docs/CACHE.md](docs/CACHE.md) — DOCX extraction, attachment cache
 - [docs/mikerust-ui-rewrite-plan.md](docs/mikerust-ui-rewrite-plan.md) — the May 2026 frontend rewrite plan, kept unchanged as a historical record
+
+## Acknowledgements
+
+Thanks to **Jugaad srl** for DevOps support and for the code-signing
+infrastructure behind the Windows installers.
+
+Thanks to **Will Chen** and the contributors to
+[`willchen96/mike`](https://github.com/willchen96/mike) for the work the
+parts listed in *Provenance and independence from Mike* come from.
 
 ## License
 
