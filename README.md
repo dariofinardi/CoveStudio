@@ -221,6 +221,17 @@ cargo run --features rag
 
 Release installers are built with `scripts/build-release.ps1`.
 
+**Code signing.** Windows artefacts are signed with Azure Trusted
+Signing, so no private key is stored anywhere: `scripts/sign-windows.ps1`
+asks the service for a short-lived certificate, authenticating with the
+current `az login` session. It needs the Windows SDK signing tools, the
+`Microsoft.Trusted.Signing.Client` NuGet package expanded under
+`%LOCALAPPDATA%\TrustedSigningClient` (the script prints the two commands
+if it is missing), and an identity holding the *Trusted Signing
+Certificate Profile Signer* role on the signing account — without that
+role the service answers `403` at signing time. The dlib is x64-only, so
+the script picks the x64 `signtool` even on an ARM64 host.
+
 **ONNX Runtime version.** `ort` is built in `load-dynamic` mode and the
 vendored `onnxruntime.dll` must match the version `ort` was compiled
 against (currently `ort 2.0.0-rc.9` / `fastembed 4.9.1` → onnxruntime
