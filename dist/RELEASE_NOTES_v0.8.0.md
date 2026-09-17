@@ -1,227 +1,238 @@
-# Cove Studio v0.8.0 — MikeRust cambia nome
+# Cove Studio v0.8.0 — MikeRust is renamed
 
-> **MikeRust si chiama ora Cove Studio.** Stesso manutentore (Dario
-> Finardi), gestione che passa direttamente alla persona fisica, nuovo
-> repository: [github.com/dariofinardi/CoveStudio](https://github.com/dariofinardi/CoveStudio).
-> L'installer sostituisce in luogo un'installazione MikeRust esistente e
-> **i dati vengono migrati automaticamente al primo avvio**: non serve
-> esportare né reinstallare nulla.
+> **MikeRust is now Cove Studio.** Same maintainer (Dario Finardi), now
+> managing the project directly as an individual, in a new repository:
+> [github.com/dariofinardi/CoveStudio](https://github.com/dariofinardi/CoveStudio).
+> The installer replaces an existing MikeRust installation in place and
+> **your data is migrated automatically on first start** — nothing to
+> export, nothing to reinstall.
 
-> **Changelog cumulativo dalla 0.6.7.** L'ultimo setup pubblicato è la
-> **v0.6.7**: la linea 0.7.x non è mai uscita come installer. Questa nota
-> raccoglie quindi tutto il lavoro da v0.7.0 a v0.8.0, così chi aggiorna
-> da 0.6.7 (o da prima) vede l'intero set di novità. Il dettaglio
-> versione per versione è in [`HISTORY.md`](../HISTORY.md).
+> **Cumulative changelog since 0.6.7.** The last published installer was
+> **v0.6.7**: the 0.7.x line never shipped as an MSI. These notes
+> therefore cover everything from v0.7.0 to v0.8.0, so anyone upgrading
+> from 0.6.7 or earlier sees the full set of changes. For the
+> version-by-version detail see [`HISTORY.md`](../HISTORY.md).
 
-Oltre al nome, la 0.8.0 affronta i tre problemi che si vedevano di più
-nell'uso reale: i documenti troppo lunghi per il modello, le schede di
-download che a volte non comparivano, e le citazioni dei documenti
-generati che non si aprivano. La linea 0.7.x, inclusa qui, aveva aggiunto
-il settore fiscale e i workflow validi su più settori.
-
----
-
-## 🏷️ Rinomina e migrazione
-
-* Nome prodotto, identificativo desktop (`app.covestudio`), eseguibile,
-  log, user agent e prefisso delle variabili d'ambiente (`COVE_`).
-* Gli archivi di progetto si scrivono come `.coveprj`; i vecchi
-  `.mikeprj` restano importabili.
-* Al primo avvio vengono spostati da soli: cartella dati
-  (`mikerust-data` → `cove-studio-data`), database (`mike.db` →
-  `cove-studio.db`, con i file `-wal`/`-shm`), cache dei modelli di
-  embedding e PII, preferenze d'interfaccia. Nessun download aggiuntivo.
-* Le variabili `MRUST_*` continuano a essere lette.
-* I modelli Ollama installati con i nomi precedenti vengono copiati sui
-  nuovi nomi e le impostazioni che li usavano vengono aggiornate; la
-  rimozione dei vecchi nomi avviene **solo dopo conferma** in
-  Impostazioni.
-
-## 📄 Documenti lunghi
-
-* **Finestra di contesto rilevata per modello.** Per i server Ollama
-  locali il valore arriva dal server stesso (modello caricato, `num_ctx`
-  del Modelfile, massimo del modello); per gli altri dal catalogo. Se il
-  server rifiuta una richiesta per superamento, il limite reale viene
-  appreso dall'errore. In Impostazioni, sotto ogni selettore di modello,
-  compare la finestra disponibile e da dove è stata ricavata.
-* **Allegati oltre il budget non vengono più troncati alla cieca**: ogni
-  documento riceve una quota proporzionale alla sua dimensione e, se la
-  supera, viene ridotto ai passi pertinenti alla domanda (ranking BM25).
-  La risposta dichiara quali documenti sono stati ridotti.
-* **`read_document` legge per pagine** (`page_from`/`page_to`, con
-  totali e punto in cui riprendere): l'assistente può percorrere un
-  documento lungo invece di perderne la coda.
-* Aggiunti al catalogo **Gemini 3.7 Flash** e **Gemini 3.8 Flash**
-  (1.048.576 token in ingresso, 65.536 in uscita).
-
-## 🩹 Documenti Word — correzioni
-
-* Un documento **generato durante la conversazione** ora riceve
-  un'etichetta citabile: le sue citazioni si aprono sul documento reale.
-  Prima l'etichetta restava non risolta e il visualizzatore segnalava
-  «sorgente rimossa» su un documento che invece esisteva.
-* **`edit_document` produce la scheda di download**: dopo una modifica
-  il documento è raggiungibile senza rigenerarlo. Un documento
-  modificato più volte nello stesso turno mostra una sola scheda.
-* Se il modello incolla nella risposta il **JSON interno di un tool**
-  (`{"doc_id":…}`), quel blocco viene rimosso a valle: la scheda di
-  download porta già quell'informazione. Un JSON che l'utente ha chiesto
-  davvero resta intatto. Riguarda soprattutto i modelli locali piccoli.
-* `find_in_document` non può più interrompersi su testi con caratteri
-  multibyte.
-
-## 🔒 Dipendenze e sicurezza
-
-* **SheetJS** aggiornato alla 0.20.3 e incluso nel repository: su npm la
-  distribuzione è ferma alla 0.18.5, che porta due vulnerabilità note
-  (prototype pollution e ReDoS) senza alcuna versione npm a cui
-  aggiornare.
-* Dipendenze npm aggiornate (postcss, js-yaml, undici, brace-expansion,
-  dompurify, vitest, svelte, vite, typescript): `pnpm audit` non segnala
-  più vulnerabilità. Lato Rust `serde_with` 3.20 → 3.22.
-* Resta aperta una segnalazione su `thrift` 0.17, che arriva da `parquet`
-  53: `parquet` abbandona thrift solo dalla 59, un aggiornamento
-  maggiore dell'intero stack arrow, pianificato a parte.
-* Gli artefatti Windows sono firmati con Azure Trusted Signing.
-
-## 🧱 Indipendenza dal codice originale
-
-* Le istruzioni base dell'assistente sono state **riscritte da zero** in
-  italiano (con la regola «rispondi nella lingua dell'utente» in testa) e
-  spostate in `config/system-prompts/base.md`.
-* README, NOTICE e `docs/UPSTREAM_SYNC.md` dichiarano con precisione cosa
-  è lavoro originale e cosa deriva ancora dal codice iniziale di Will
-  Chen (schemi dei tool built-in, preset del dominio legale, alcune
-  stringhe d'interfaccia). La licenza resta AGPL-3.0-only.
+Beyond the name, 0.8.0 addresses the three problems that showed up most
+in real use: documents too long for the model, download cards that
+sometimes did not appear, and citations of generated documents that
+would not open. The 0.7.x line, included here, had added the Italian tax
+sector and workflows valid across several sectors.
 
 ---
 
+## 🏷️ Renaming and migration
+
+* Product name, desktop identifier (`app.covestudio`), executable, log
+  file, user agent and environment-variable prefix (`COVE_`).
+* Project archives are written as `.coveprj`; existing `.mikeprj` files
+  can still be imported.
+* On first start these move by themselves: the data folder
+  (`mikerust-data` → `cove-studio-data`), the database (`mike.db` →
+  `cove-studio.db`, with its `-wal`/`-shm` files), the embedding and PII
+  model caches, and the interface preferences. No extra download.
+* `MRUST_*` environment variables are still read.
+* Ollama models installed under the previous names are copied to the new
+  names and the settings that used them are updated; removing the old
+  names happens **only after you confirm** in Settings → Models.
+
+## 📄 Long documents
+
+* **Context window detected per model.** For local Ollama servers the
+  value comes from the server itself (loaded model, Modelfile `num_ctx`,
+  model maximum); for the others from the model catalogue. If the server
+  rejects a request for overflow, the real limit is learnt from that
+  error. Settings shows the available window, and where the number came
+  from, under each model picker.
+* **Attachments over the budget are no longer truncated blindly**: each
+  document gets a share proportional to its size and, when it exceeds
+  that share, is reduced to the passages relevant to the question (BM25
+  ranking). The reply states which documents were excerpted.
+* **`read_document` reads by page** (`page_from`/`page_to`, with totals
+  and where to continue), so the assistant can walk through a long
+  document instead of losing its tail.
+* **Gemini 3.7 Flash** and **Gemini 3.8 Flash** added to the catalogue
+  (1,048,576 input / 65,536 output tokens).
+
+## 🩹 Word documents — fixes
+
+* A document **generated during the conversation** now gets a citable
+  handle, so its citations open the real document. The handle used to
+  stay unresolved and the viewer reported a "removed source" for a
+  document that did exist.
+* **`edit_document` produces a download card**, so an edited document is
+  reachable without regenerating it. A document edited more than once in
+  the same turn shows a single card.
+* When the model pastes a tool's **internal JSON** (`{"doc_id":…}`) into
+  its answer, that block is stripped afterwards: the download card
+  already carries the information. JSON you actually asked for is left
+  untouched. This mostly affected small local models.
+* `find_in_document` can no longer break on text with multi-byte
+  characters.
+
+## 🔒 Dependencies and security
+
+* **SheetJS** updated to 0.20.3 and vendored in the repository: the npm
+  distribution is stuck at 0.18.5, which carries two known
+  vulnerabilities (prototype pollution and ReDoS) with no npm release to
+  upgrade to.
+* npm dependencies updated (postcss, js-yaml, undici, brace-expansion,
+  dompurify, vitest, svelte, vite, typescript): `pnpm audit` reports no
+  known vulnerabilities. On the Rust side `serde_with` 3.20 → 3.22.
+* Still open: an advisory on `thrift` 0.17, pulled in by `parquet` 53.
+  `parquet` drops thrift only from version 59, a major upgrade of the
+  whole arrow stack, planned separately.
+* Windows artefacts are signed with Azure Trusted Signing.
+
+## 🧱 Independence from the original code
+
+* The assistant's base instructions were **rewritten from scratch**, with
+  a reply-in-the-user's-language rule first, and moved to
+  `config/system-prompts/base.md`.
+* README, NOTICE and `docs/UPSTREAM_SYNC.md` state precisely what is
+  original work and what still derives from Will Chen's initial code
+  (built-in tool schemas, legal-domain presets, some interface strings).
+  The licence remains AGPL-3.0-only.
+
 ---
 
-# Linea 0.7.x — mai pubblicata come setup
+# The 0.7.x line — never published as an installer
 
-Chi aggiorna dalla 0.6.7 trova anche tutto questo.
+Upgrading from 0.6.7 brings all of this as well.
 
-## 🧾 Nuovo settore «Fiscale» (v0.7.0)
+## 🧾 New "Tax" sector (v0.7.0)
 
-Dodicesimo verticale professionale, accanto a `finance`: finance copre
-l'analisi (bilanci, valutazione d'azienda, crisi), fiscale la
-tax-compliance e la consulenza (IVA, dichiarazioni, imposte dirette e
-indirette, ravvedimento, accertamento, contenzioso).
+A twelfth professional vertical, alongside `finance`: finance covers
+analysis (financial statements, company valuation, distress), tax covers
+compliance and advice (VAT, returns, direct and indirect taxes,
+voluntary correction, assessment, litigation). Italian tax law.
 
-* System prompt dedicato **in 6 lingue**, con le **riforme fiscali 2024**
-  già recepite, così il modello non cita istituti superati: abrogazione
-  del reclamo-mediazione (dal 4.1.2024), nuovo regime sanzionatorio
-  D.Lgs. 87/2024 (omesso versamento 30% → 25%), contraddittorio
-  preventivo generalizzato.
-* **8 workflow preset**: parere tributario, ravvedimento operoso,
-  analisi dell'avviso di accertamento, riconciliazione IVA, verifica
-  forfettario, quadro RW (IVIE/IVAFE), imposte indirette su atti,
-  scadenzario F24.
-* **9 preset di colonna**: imponibile, aliquota, imposta dovuta,
-  ritenuta, sanzione, interessi, norma, scadenza, codice tributo.
+* A dedicated system prompt **in 6 languages**, with the **2024 Italian
+  tax reforms** already reflected, so the model does not cite repealed
+  rules: abolition of *reclamo-mediazione* (from 4 January 2024), the new
+  penalty regime under D.Lgs. 87/2024 (late payment 30% → 25%), and the
+  generalised prior-hearing requirement.
+* **8 workflow presets**: tax opinion, voluntary correction, assessment
+  notice analysis, VAT reconciliation, flat-rate regime check, RW form
+  (IVIE/IVAFE), indirect taxes on deeds, F24 payment schedule.
+* **9 column presets**: taxable base, rate, tax due, withholding,
+  penalty, interest, legal basis, deadline, tax code.
 
-## 📊 Analisi del bilancio ai fini fiscali (v0.7.2)
+## 📊 Financial statements read for tax purposes (v0.7.2)
 
-Tre workflow che leggono il bilancio in chiave fiscale, non
-civilistica: **analisi fiscale del bilancio** (derivazione ex art. 83
-TUIR, voci tax-relevant, stima IRES, fiscalità differita OIC 25),
-**riconciliazione civilistico-fiscale** in stile Quadro RF (una riga per
-variazione, con articolo TUIR e rigo) e **base imponibile IRAP** (art. 5
-D.Lgs. 446/97). Il settore fiscale arriva a 11 workflow.
+Three workflows that read the statements through a tax lens rather than
+a civil-law one: **tax analysis of the financial statements** (derivation
+under art. 83 TUIR, tax-relevant items, IRES estimate, deferred tax
+under OIC 25), **civil-to-tax reconciliation** in RF-form style (one row
+per adjustment, with the TUIR article and the form line) and the **IRAP
+taxable base** (art. 5, D.Lgs. 446/97). The tax sector reaches 11
+workflows.
 
-## 🇮🇹 Settore legale in italiano (v0.7.1)
+## 🇮🇹 Legal sector in Italian (v0.7.1)
 
-Tradotti i **27 preset** del settore legale — l'ultimo contenuto ancora
-in inglese del catalogo: 14 workflow e 13 preset di colonna, in registro
-giuridico italiano. I concetti sono stati **adattati** all'ordinamento
-italiano dove necessario (per esempio la tutela della locazione ex
-L. 392/1978, l'indicizzazione ISTAT dei canoni); i termini di mercato
-sono rimasti non tradotti (SOFR, EURIBOR, carried interest…).
+The **27 presets** of the legal sector were translated — the last
+English-only content in the catalogue: 14 workflows and 13 column
+presets, in Italian legal register. Concepts were **adapted** to Italian
+law where needed (for example tenancy protection under L. 392/1978, ISTAT
+rent indexation); market terms were left untranslated (SOFR, EURIBOR,
+carried interest…).
 
-## 🔗 Workflow validi su più settori (v0.7.3 e v0.7.5)
+## 🔗 Workflows valid across sectors (v0.7.3 and v0.7.5)
 
-Un workflow può comparire nel selettore di **più settori** senza
-duplicarne la definizione. Prima solo per i preset di sistema (v0.7.3),
-poi anche per i **workflow creati dall'utente** (v0.7.5), con un
-selettore a etichette nell'editor. Gli aggiornamenti non cambiano il
-comportamento dei workflow esistenti, che restano su un solo settore.
+A workflow can appear in the picker of **several sectors** without
+duplicating its definition. First for built-in presets (v0.7.3), then
+for **user-created workflows** too (v0.7.5), with a tag picker in the
+editor. Existing workflows are unaffected and stay single-sector.
 
 ---
 
-## Installazione
+## Installation
 
-| Architettura | File |
+| Architecture | File |
 |---|---|
 | Windows x86_64 | `Cove Studio_0.8.0_x64.msi` |
 | Windows ARM64 (Snapdragon X Elite) | `Cove Studio_0.8.0_arm64.msi` |
 
-L'installer sostituisce MikeRust mantenendo i dati (stesso *upgrade
-code*): non disinstallare la versione precedente, né esportare nulla.
-Dopo il primo avvio la cartella `mikerust-data` non esiste più, è
-diventata `cove-studio-data`; il database è `cove-studio.db`.
+The installer replaces MikeRust and keeps your data (same *upgrade
+code*): do not uninstall the previous version, and do not export
+anything first. After the first start the `mikerust-data` folder is gone
+— it became `cove-studio-data`, with the database named
+`cove-studio.db`.
 
-Ogni MSI include le librerie native corrispondenti all'architettura
-(`onnxruntime.dll` 1.20.0 e `pdfium.dll`): non serve installare altro.
+Each MSI carries the native libraries for its architecture
+(`onnxruntime.dll` 1.20.0 and `pdfium.dll`): nothing else to install.
 
-### Firma e verifica
+### Signature and verification
 
-Eseguibile e installer sono firmati con Azure Trusted Signing. Windows
-mostra come editore **Jugaad srl**, che fornisce l'infrastruttura di
-firma (vedi *Ringraziamenti* nel README); copyright e manutenzione del
-progetto restano di Dario Finardi. Per controllare:
+The application binary and the installer are signed with Azure Trusted
+Signing. Windows shows **Jugaad srl** as the publisher: Jugaad provides
+the signing infrastructure (see *Acknowledgements* in the README), while
+the copyright and the maintenance of the project are Dario Finardi's. To
+check:
 
 ```powershell
 Get-AuthenticodeSignature ".\Cove Studio_0.8.0_arm64.msi" |
   Select-Object Status, @{n='Publisher';e={$_.SignerCertificate.Subject}}
 ```
 
-Atteso: `Status = Valid` e
+Expected: `Status = Valid` and
 `CN=Jugaad srl, O=Jugaad srl, L=Montecchio Emilia, S=Reggio Emilia, C=IT`.
-La firma è marcata temporalmente (RFC 3161), quindi resta valida anche
-dopo la scadenza del certificato di firma.
+The signature is timestamped (RFC 3161), so it stays valid after the
+signing certificate itself expires.
 
-## Note per chi aggiorna
+## Models are downloaded on first use
 
-* **Modelli locali (Ollama).** Al primo avvio i modelli installati con i
-  nomi precedenti (`mike-…`, `mikerust-…`) vengono copiati sui nuovi
-  nomi e le impostazioni aggiornate. La copia non cancella nulla: la
-  rimozione dei vecchi nomi va confermata in Impostazioni → Modelli.
-* **Chiavi API e PIN.** Restano dov'erano: la migrazione sposta il
-  database, non lo riscrive.
-* **Progetti esportati.** I file `.mikeprj` continuano a essere
-  importabili; i nuovi export sono `.coveprj`.
-* **Variabili d'ambiente.** `MRUST_*` funziona ancora, ma il nome nuovo è
-  `COVE_*`; `.env.example` è aggiornato.
-* **Chunk orfani.** Se in passato hai indicizzato documenti poi spostati
-  o cancellati, il log segnala «orphan KB chunk dropped»: i chunk vengono
-  ignorati nella risposta e si eliminano definitivamente con
+The installer contains no model weights, and nothing is downloaded at
+startup. Each model is fetched the first time it is actually needed,
+with a progress bar in the chat:
+
+| Model | When | Size |
+|---|---|---|
+| Embeddings, `multilingual-e5-base` INT8 | first indexing or search over documents | ~283 MB |
+| GLiNER2 PII | first use of PII protection | ~1.1 GB |
+| Local Ollama models | only in secure local mode, after you confirm | varies |
+| Corpora (parquet datasets, EUR-Lex…) | only when you add that corpus | varies |
+
+On a machine without internet access the app still starts and chats
+work, but document search stays unavailable until the embedding model is
+downloaded. Upgrading from MikeRust downloads nothing: the existing
+caches are renamed, not re-fetched.
+
+## Notes for people upgrading
+
+* **API keys and PIN** stay where they are: the migration moves the
+  database, it does not rewrite it.
+* **Exported projects**: `.mikeprj` files remain importable; new exports
+  are `.coveprj`.
+* **Environment variables**: `MRUST_*` still works, but the new prefix is
+  `COVE_*`; `.env.example` is up to date.
+* **Orphan chunks**: if you once indexed documents that were later moved
+  or deleted, the log reports "orphan KB chunk dropped". Those chunks are
+  ignored in answers and can be purged for good with
   `POST /sync/cleanup-orphans`.
 
-## Limiti noti in questa versione
+## Known limitations in this release
 
-* Su alcune configurazioni Windows ARM64 il provider DirectML non si
-  registra e gli embedding girano su CPU: più lento, senza differenze di
-  risultato.
-* `gemini-3.7-flash` può rifiutare richieste contro un limite di 32.768
-  token non documentato e non coerente con `countTokens` (difetto
-  segnalato a Google). Se capita, usa `gemini-3.8-flash` o
+* On some Windows ARM64 configurations the DirectML provider fails to
+  register and embeddings run on the CPU: slower, same results.
+* `gemini-3.7-flash` may reject requests against an undocumented
+  32,768-token ceiling that does not match `countTokens` (reported
+  upstream to Google). If it happens, use `gemini-3.8-flash` or
   `gemini-3.5-flash`.
-* Resta aperta la vulnerabilità `thrift` 0.17 ereditata da `parquet` 53
-  (allocazione eccessiva su file parquet malformati): riguarda la lettura
-  di file parquet di terzi, e la correzione richiede l'aggiornamento
-  maggiore dello stack arrow.
+* The `thrift` 0.17 advisory inherited from `parquet` 53 is still open
+  (excessive allocation on malformed parquet files): it concerns reading
+  third-party parquet files, and fixing it requires the major arrow
+  upgrade.
 
-## Provenienza e licenza
+## Provenance and licence
 
-Cove Studio è software libero sotto **AGPL-3.0-only**. Il lavoro
-originale è © 2026 Dario Finardi; le parti che derivano ancora da
-[`willchen96/mike`](https://github.com/willchen96/mike) — schemi dei tool
-built-in, preset del dominio legale, alcune stringhe d'interfaccia — sono
-dei rispettivi autori sotto la stessa licenza. Il dettaglio di cosa
-deriva da cosa è in `README.md` (sezione *Provenance and independence
-from Mike*) e in `docs/UPSTREAM_SYNC.md`.
+Cove Studio is free software under **AGPL-3.0-only**. The original work
+is © 2026 Dario Finardi; the parts still derived from
+[`willchen96/mike`](https://github.com/willchen96/mike) — built-in tool
+schemas, legal-domain presets, some interface strings — belong to their
+authors under the same licence. What derives from what is set out in
+`README.md` (section *Provenance and independence from Mike*) and in
+`docs/UPSTREAM_SYNC.md`.
 
-I nomi **Cove Studio** e **MikeRust** e il logo non sono coperti dalla
-licenza del codice: vedi `NOTICE.md`.
+The names **Cove Studio** and **MikeRust** and the logo are not covered
+by the code licence: see `NOTICE.md`.
