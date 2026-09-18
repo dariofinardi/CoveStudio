@@ -6,6 +6,7 @@ pub mod document_segments;
 pub mod domain;
 pub mod embeddings;
 pub mod http_client;
+pub mod ingest;
 pub mod llm;
 pub mod mcp;
 pub mod project_archive;
@@ -198,13 +199,12 @@ pub async fn run_server_with_channels(
     // dependency, so the symbol is in scope.
     #[cfg(any(feature = "rag", feature = "ner-pii"))]
     {
-        if let Err(e) = ort::init().with_name(crate::product::NAME).commit() {
-            // Non-fatal: a re-init from a different code path or
-            // a feature-flag combination that double-initialises
-            // would just produce a hard error. We log and let the
-            // engine-specific loaders surface their own failures
-            // when the runtime is actually invoked.
-            tracing::warn!("[ort] init() returned {e:?} — continuing");
+        // Since ort rc.13 `commit()` answers with a bool: true when
+        // this call installed the environment, false when one was
+        // already in place. Neither is an error — a second caller
+        // simply inherits the first environment — so we only note it.
+        if !ort::init().with_name(crate::product::NAME).commit() {
+            tracing::debug!("[ort] runtime already initialised by another code path");
         }
     }
 

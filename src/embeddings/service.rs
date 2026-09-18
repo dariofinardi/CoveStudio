@@ -166,6 +166,15 @@ impl EmbeddingService {
     }
 
     async fn ensure_model(&self) -> Result<&Mutex<TextEmbedding>> {
+        // Belt and braces on the dylib path. The application sets it at
+        // startup, but any other entry point into this service — tests,
+        // a tool, a future CLI — would otherwise let `ort` resolve
+        // "onnxruntime.dll" by name and find Windows' own copy in
+        // System32 (ORT 1.17.x, shipped with Windows ML). Under ort
+        // rc.9 that ended in a silent deadlock; rc.13 rejects it with
+        // `BadVersion`. Either way the fix is to point at our vendored
+        // DLL before the first session is built.
+        ensure_onnxruntime_dylib_path();
         // Pre-download the model files explicitly with progress
         // updates, then hand the bytes to fastembed via the
         // `try_new_from_user_defined` entry point. This avoids
@@ -825,9 +834,9 @@ async fn download_one(
 /// Empty vec means "CPU only" (the ort default).
 #[cfg(feature = "rag")]
 fn build_execution_providers()
--> Vec<ort::execution_providers::ExecutionProviderDispatch> {
+-> Vec<ort::ep::ExecutionProviderDispatch> {
     #[allow(unused_mut)]
-    let mut out: Vec<ort::execution_providers::ExecutionProviderDispatch> = Vec::new();
+    let mut out: Vec<ort::ep::ExecutionProviderDispatch> = Vec::new();
 
     // ── NPU class ─────────────────────────────────────────────────
     #[cfg(feature = "rag-qnn")]
@@ -836,7 +845,7 @@ fn build_execution_providers()
         // `QnnHtp.dll` must be reachable; fp16 halves memory and ~2x
         // throughput vs fp32.
         out.push(
-            ort::execution_providers::QNNExecutionProvider::default()
+            ort::ep::QNN::default()
                 .with_backend_path("QnnHtp.dll")
                 .with_htp_fp16_precision(true)
                 .build(),
@@ -845,23 +854,23 @@ fn build_execution_providers()
     #[cfg(feature = "rag-cann")]
     {
         // Huawei Ascend NPU.
-        out.push(ort::execution_providers::CANNExecutionProvider::default().build());
+        out.push(ort::ep::CANN::default().build());
     }
     #[cfg(feature = "rag-nnapi")]
     {
         // Android Neural Networks API — no-op on desktop targets, but
         // harmless to leave compiled in.
-        out.push(ort::execution_providers::NNAPIExecutionProvider::default().build());
+        out.push(ort::ep::NNAPI::default().build());
     }
     #[cfg(feature = "rag-rknpu")]
     {
         // Rockchip RK3588 / RK3568 NPU.
-        out.push(ort::execution_providers::RKNPUExecutionProvider::default().build());
+        out.push(ort::ep::RKNPU::default().build());
     }
     #[cfg(feature = "rag-vitis")]
     {
         // AMD/Xilinx Vitis AI FPGA.
-        out.push(ort::execution_providers::VitisAIExecutionProvider::default().build());
+        out.push(ort::ep::Vitis::default().build());
     }
 
     // ── GPU class ─────────────────────────────────────────────────
@@ -869,31 +878,31 @@ fn build_execution_providers()
     {
         // NVIDIA TensorRT — graph optimiser on top of CUDA. Listed
         // before plain CUDA so ort prefers it when both are available.
-        out.push(ort::execution_providers::TensorRTExecutionProvider::default().build());
+        out.push(ort::ep::TensorRT::default().build());
     }
     #[cfg(feature = "rag-cuda")]
     {
-        out.push(ort::execution_providers::CUDAExecutionProvider::default().build());
+        out.push(ort::ep::CUDA::default().build());
     }
     #[cfg(feature = "rag-migraphx")]
     {
         // AMD MIGraphX — graph optimiser on top of ROCm.
-        out.push(ort::execution_providers::MIGraphXExecutionProvider::default().build());
+        out.push(ort::ep::MIGraphX::default().build());
     }
     #[cfg(feature = "rag-rocm")]
     {
-        out.push(ort::execution_providers::ROCmExecutionProvider::default().build());
+        out.push(ort::ep::ROCm::default().build());
     }
     #[cfg(feature = "rag-directml")]
     {
         // DirectML — any DX12 GPU on Windows (Adreno X1, Iris, Radeon,
         // GeForce). Picks up the most capable adapter automatically.
-        out.push(ort::execution_providers::DirectMLExecutionProvider::default().build());
+        out.push(ort::ep::DirectML::default().build());
     }
     #[cfg(feature = "rag-coreml")]
     {
         // Apple Silicon ANE / GPU. Best perf on M-series.
-        out.push(ort::execution_providers::CoreMLExecutionProvider::default().build());
+        out.push(ort::ep::CoreML::default().build());
     }
     // NOTE: WebGPU dropped together with the rc.12 → rc.9 downgrade;
     // ORT 1.20.0 predates the WebGPU EP. Will return when we bump
@@ -901,19 +910,19 @@ fn build_execution_providers()
     #[cfg(feature = "rag-openvino")]
     {
         // Intel CPU / iGPU / Movidius VPU.
-        out.push(ort::execution_providers::OpenVINOExecutionProvider::default().build());
+        out.push(ort::ep::OpenVINO::default().build());
     }
 
     // ── Optimised CPU class ───────────────────────────────────────
     #[cfg(feature = "rag-onednn")]
     {
         // Intel oneDNN — CPU-side optimised kernels.
-        out.push(ort::execution_providers::OneDNNExecutionProvider::default().build());
+        out.push(ort::ep::OneDNN::default().build());
     }
     #[cfg(feature = "rag-acl")]
     {
         // ARM Compute Library.
-        out.push(ort::execution_providers::ACLExecutionProvider::default().build());
+        out.push(ort::ep::ACL::default().build());
     }
     // NOTE: Arm NN was removed from upstream ONNX Runtime — use ACL,
     // XNNPACK, or the Kleidi-optimised CPU EP instead. The `rag-armnn`
@@ -921,12 +930,12 @@ fn build_execution_providers()
     #[cfg(feature = "rag-xnnpack")]
     {
         // Google XNNPACK — mobile / low-end CPU optimisation.
-        out.push(ort::execution_providers::XNNPACKExecutionProvider::default().build());
+        out.push(ort::ep::XNNPACK::default().build());
     }
     #[cfg(feature = "rag-tvm")]
     {
         // Apache TVM.
-        out.push(ort::execution_providers::TVMExecutionProvider::default().build());
+        out.push(ort::ep::TVM::default().build());
     }
 
     // NOTE: the Azure EP was dropped together with the rc.12 → rc.9
@@ -970,6 +979,15 @@ fn build_execution_providers() -> Vec<()> {
 /// no surprise version mismatches across machines.
 #[cfg(feature = "rag")]
 pub fn ensure_onnxruntime_dylib_path() {
+    // Called from process startup *and* lazily from `ensure_model`, so
+    // the walk and the env write happen exactly once however many
+    // entry points there are.
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(resolve_onnxruntime_dylib_path);
+}
+
+#[cfg(feature = "rag")]
+fn resolve_onnxruntime_dylib_path() {
     if std::env::var_os("ORT_DYLIB_PATH").is_some() {
         tracing::info!(
             "[rag] ORT_DYLIB_PATH already set — honouring explicit override"

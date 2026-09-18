@@ -39,10 +39,21 @@ describe('toCitation', () => {
     expect(c.quote).toBe('the parties agree')
   })
 
-  it('falls back to the chat-local label when no UUID is present', () => {
+  it('never passes an unresolved doc-N label on as a fetchable id', () => {
+    // The backend resolves `doc-3` to a real document id when it can; a
+    // label that survives here is one it could not resolve, and using
+    // it would make the viewer request /document/doc-3 and report a
+    // removed source for a document that exists.
     const c = toCitation({ ref: 'g2', doc_id: 'doc-3', quote: 'x' })
-    expect(c.docId).toBe('doc-3')
+    expect(c.docId).toBe('')
     expect(c.scope).toBe('global')
+  })
+
+  it('keeps a non-label identifier as the id', () => {
+    // Anything that is not a `doc-N` handle is a real identifier (a
+    // corpus key, a file name) and must still reach the viewer.
+    const c = toCitation({ ref: 'g1', doc_id: 'eurlex_32016R0679', quote: 'x' })
+    expect(c.docId).toBe('eurlex_32016R0679')
   })
 
   it('accepts a page range string for a quote spanning a page break', () => {

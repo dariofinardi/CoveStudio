@@ -1310,7 +1310,14 @@
     "retrievalHydeEnabledToast": "HyDE aktiviert — die nächste Chat-Runde wird es nutzen",
     "retrievalHydeDisabledToast": "HyDE deaktiviert — zurück zur reinen Cosinus-Recherche",
     "retrievalLoadError": "Recherche-Einstellungen konnten nicht geladen werden: {err}",
-    "retrievalSaveError": "Recherche-Einstellung konnte nicht gespeichert werden: {err}"
+    "retrievalSaveError": "Recherche-Einstellung konnte nicht gespeichert werden: {err}",
+    "piiTitle": "Schutz personenbezogener Daten",
+    "piiThresholdLabel": "Vorsicht beim Maskieren",
+    "piiThresholdMinLabel": "Mehr maskieren",
+    "piiThresholdMaxLabel": "Nur was sicher ist",
+    "piiThresholdHint": "Konfidenzschwelle, mit der das Modell entscheidet, ob ein Text ein personenbezogenes Datum ist. Ein niedrigerer Wert maskiert mehr Text und erzeugt mehr Fehltreffer (ein Firmenname wird als Person gelesen); ein höherer lässt Zweifelsfälle im Klartext. Ein erkannter Wert wird ohnehin an jeder Stelle im Dokument maskiert.",
+    "piiThresholdSaved": "Einstellung gespeichert",
+    "piiThresholdSaveError": "Einstellung konnte nicht gespeichert werden"
   },
   "ColumnFormats": {
     "free_text": "Freitext",

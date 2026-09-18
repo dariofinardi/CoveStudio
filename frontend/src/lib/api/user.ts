@@ -68,6 +68,24 @@ export const userApi = {
       body: { hyde_enabled },
     }),
 
+  /** Confidence threshold of the PII detector: a span is masked when
+   *  the model scores it at or above this value, so LOWER masks more
+   *  and accepts more false positives. Persisted in
+   *  `user_settings.pii_threshold` (migration 0035). Default 0.5, the
+   *  model's calibrated value. It governs detection only — a detected
+   *  value is always replaced at every literal occurrence in the
+   *  document. */
+  getPiiThreshold: () =>
+    api<{ pii_threshold: number; min: number; max: number; default: number }>(
+      '/user/pii-threshold',
+    ),
+
+  updatePiiThreshold: (pii_threshold: number) =>
+    api<{ ok: boolean; pii_threshold: number }>('/user/pii-threshold', {
+      method: 'PUT',
+      body: { pii_threshold },
+    }),
+
   getLlmSettings: () => api<LlmSettings>('/user/llm-settings'),
 
   /** Patch semantics: omit fields to leave them unchanged. */

@@ -1328,7 +1328,14 @@
     "retrievalHydeEnabledToast": "HyDE enabled — next chat turn will use it",
     "retrievalHydeDisabledToast": "HyDE disabled — back to pure cosine retrieval",
     "retrievalLoadError": "Could not load retrieval settings: {err}",
-    "retrievalSaveError": "Could not save retrieval setting: {err}"
+    "retrievalSaveError": "Could not save retrieval setting: {err}",
+    "piiTitle": "Personal-data protection",
+    "piiThresholdLabel": "Masking caution",
+    "piiThresholdMinLabel": "Mask more",
+    "piiThresholdMaxLabel": "Only what is certain",
+    "piiThresholdHint": "Confidence threshold the model uses to decide whether a piece of text is personal data. Lowering it masks more text and produces more false positives (a company name read as a person); raising it leaves doubtful cases in clear text. A value that is recognised is always masked at every occurrence in the document.",
+    "piiThresholdSaved": "Setting saved",
+    "piiThresholdSaveError": "Could not save the setting"
   },
   "ColumnFormats": {
     "free_text": "Free text",

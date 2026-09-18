@@ -16,6 +16,71 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.9.0 — 2026-09-18 (one ONNX Runtime: ort rc.13, and PII rebuilt on gliner2-rs)
+
+The process can host exactly one ONNX Runtime, and three things now want
+it: the embedding model, the redesigned GLiNER2 crate and — next — the
+OCR pipeline for scanned PDFs. This release moves the whole stack onto
+the version they agree on.
+
+### Changed — inference stack
+
+* `ort` 2.0.0-rc.9 → **=2.0.0-rc.13**, `fastembed` 4.9.1 → **=5.17.4**
+  (which declares `ort/api-24`), vendored `onnxruntime.dll` 1.20.0 →
+  **1.28.2** for both Windows architectures. Release candidates 10 to 12
+  were rejected upstream because models hung during session
+  initialisation on ARM; rc.13 is the first since rc.9 that runs them,
+  and it was validated on win-arm64 before this move.
+* `ort::init().commit()` answers with a `bool` now (`false` = an
+  environment was already installed), not a `Result`; the previous code
+  logged that as an error.
+* The execution-provider module was renamed (`execution_providers` →
+  `ep`) and every type lost its suffix: `DirectMLExecutionProvider` →
+  `DirectML` and fifteen others.
+
+### Fixed
+
+* **Windows ships its own `onnxruntime.dll`** (ORT 1.17.x, part of
+  Windows ML, in System32). With `ORT_DYLIB_PATH` unset, `ort` loaded
+  *that* — which is what the "silent deadlock" of earlier releases
+  actually was. The variable was only set at application startup, so
+  tests and any other entry point took the system copy. It is now
+  resolved lazily on first model load as well, once per process, and
+  rc.13 reports a mismatch instead of hanging.
+
+### Changed — PII protection
+
+* Rebuilt on **`gliner2-rs` 0.9.6** (Apache-2.0, from crates.io),
+  replacing `gliner2_inference` 0.5.1. The engine lives on a dedicated
+  thread because `SpanEngine` is not `Send`, which also serialises
+  inference and keeps a panic in the model from poisoning a shared
+  lock. The 1.1 GB of weights already on disk are reused as they are.
+* The label vocabulary is the model's own, asked one group at a time,
+  instead of eighteen hand-written labels; `codice fiscale`,
+  `partita IVA`, `targa` and `patient name` stay as an extra group.
+  Chunking is the library's, in words, with the seam de-duplication it
+  ships.
+* Redaction keeps **every literal occurrence** of a detected value,
+  not only the spans the model marked: the library's offset-accurate
+  pass runs first, then ours. A name caught once is not left in clear
+  text three paragraphs later.
+* **Masking caution** is now a slider in Settings → Sicurezza
+  (`user_settings.pii_threshold`, migration 0035), labelled by effect
+  rather than by number. The default is the model's calibrated 0.5:
+  the previous hard-coded 0.2 was tuned against an engine whose prompt
+  layout was defective, so its scores do not transfer. A document
+  already redacted keeps its masking until it is processed again; the
+  cache wins over the slider, and the log says so.
+
+### Notes
+
+* Verified: 535 unit tests, 11 real-inference embedding tests, 11
+  real-model PII tests (masking, repetition, threshold monotonicity,
+  offsets, chunk seams, multibyte text, clean text untouched), 8
+  functional tests on the threshold endpoint, 55 frontend tests.
+
+---
+
 ## v0.8.0 — 2026-09-17 (Cove Studio, renamed from MikeRust)
 
 MikeRust is renamed **Cove Studio**. The maintainer is unchanged (Dario

@@ -7,29 +7,25 @@
 //! Pipeline (full spec: `docs/gliner2-pii-plan.md`):
 //!
 //! ```text
-//! text + Option<&[label]>
-//!   → engine::extract_entities(text, labels)
-//!         Gliner2Engine::from_pretrained(SemplificaAI/gliner2-
-//!         privacy-filter-PII-multi, Some("fp16_v2"), HF)
-//!         singleton, lazy-loaded, fp16 inference on the same
-//!         onnxruntime 1.20.0 DLL fastembed already uses
-//!   → Vec<Entity { start, end, label, score, text }>
+//! text + Option<&[label]> + threshold
+//!   → engine::mask_pii
+//!         SpanEngine (gliner2-rs 0.9.6), lazy singleton, fp16 on the
+//!         same onnxruntime DLL fastembed already loads
+//!       · one SchemaTask per trained PII group + our extras
+//!       · chunked in words, spans remapped and merged at the seams
+//!       · privacy::redact by offset, then every remaining literal
+//!         occurrence of a detected value
+//!   → redacted String
 //! ```
 //!
-//! Default PII label set lives in `labels.rs`; callers can override
-//! with their own subset (e.g. only `["fiscal_code","iban"]` for a
-//! contract-redaction workflow). The engine is loaded once per
-//! process and re-used across requests — the underlying
-//! `Gliner2Engine` is `Send + Sync`.
+//! The detection threshold comes from the user's setting
+//! (`user_settings.pii_threshold`, migration 0035): lower masks more.
+//! The label vocabulary is the model's own (`gliner2_rs::privacy`), so
+//! there is no local label list to keep in sync any more.
 
 #![cfg(feature = "ner-pii")]
 
 pub mod bootstrap;
 pub mod engine;
-pub mod labels;
 
-pub use engine::{
-    extract_entities, mask_pii, status, Entity, NerStatus, ProgressFn,
-    GLINER2_OVERLAP_CHARS, GLINER2_WINDOW_CHARS,
-};
-pub use labels::default_pii_labels;
+pub use engine::{extract_entities, mask_pii, status, Entity, NerStatus, ProgressFn};

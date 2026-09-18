@@ -902,6 +902,7 @@ async fn load_attached_docs(
     document_ids: &[String],
     vision_ok: bool,
     pii_protected_ids: &std::collections::HashSet<String>,
+    pii_threshold: f32,
     sse_tx: &tokio::sync::mpsc::Sender<Result<axum::response::sse::Event, std::convert::Infallible>>,
 ) -> Vec<DocPayload> {
     let mut out = Vec::new();
@@ -1021,6 +1022,7 @@ async fn load_attached_docs(
                     pii_on,
                     doc_id,
                     &filename,
+                    pii_threshold,
                     sse_tx,
                 )
                 .await;
@@ -1181,6 +1183,7 @@ async fn load_attached_docs(
                     pii_on,
                     doc_id,
                     &filename,
+                    pii_threshold,
                     sse_tx,
                 )
                 .await,
@@ -1218,6 +1221,13 @@ async fn load_attached_docs(
 /// the raw extracted text and consult it before any inference. The key
 /// space is flat under `cache/pii/` so a future garbage-collection sweep
 /// over deleted documents is a single prefix walk.
+/// Cache key for a redacted document. Deliberately independent of the
+/// detection threshold: a document already redacted keeps the text it
+/// was redacted with, and a new threshold applies from its next
+/// processing onwards. Re-masking every cached document when the
+/// slider moves would mean minutes of inference the user did not ask
+/// for, and would silently rewrite text they may already have read.
+/// The trade-off is visible in the Settings hint.
 fn pii_cache_key(doc_id: &str) -> String {
     format!("cache/pii/{doc_id}.txt")
 }
@@ -1227,6 +1237,8 @@ async fn maybe_redact_pii(
     protected: bool,
     doc_id: &str,
     filename: &str,
+    // Detection threshold from the user's settings; lower masks more.
+    #[allow(unused_variables)] threshold: f32,
     #[allow(unused_variables)] sse_tx: &tokio::sync::mpsc::Sender<
         Result<axum::response::sse::Event, std::convert::Infallible>,
     >,
@@ -1250,7 +1262,7 @@ async fn maybe_redact_pii(
             let cached = String::from_utf8_lossy(&bytes).into_owned();
             if !cached.is_empty() {
                 tracing::info!(
-                    "[chat] PII cache hit for {filename} (doc_id={doc_id}): {} chars",
+                    "[chat] PII cache hit for {filename} (doc_id={doc_id}): {} chars                      — served as redacted earlier; the current threshold                      ({threshold:.2}) applies from the next processing of this                      document",
                     cached.len()
                 );
                 use axum::response::sse::Event;
@@ -1342,7 +1354,7 @@ async fn maybe_redact_pii(
                 let _ = prog_tx.try_send((current, total));
             },
         );
-        let result = crate::ner::mask_pii(&text, None, Some(progress_cb)).await;
+        let result = crate::ner::mask_pii(&text, None, threshold, Some(progress_cb)).await;
         // Drop the closure (and with it `prog_tx`) so the forwarder
         // sees EOF and emits the `done` event.
         let _ = forwarder.await;
@@ -3097,11 +3109,26 @@ async fn run_chat_turn(turn: ChatTurn, tx: SseSender) {
         emit(&tx, &json!({ "type": "chat_id", "chatId": &chat_id })).await;
     }
 
+    // Read once per turn rather than per attachment: the value is a
+    // single row and every protected document in this turn must be
+    // redacted at the same setting, or two attachments in one answer
+    // would be masked to different depths.
+    let pii_threshold =
+        crate::routes::user::fetch_pii_threshold(&state.db, &user_id).await as f32;
+
     // Parallel loading. The library listing lets the model
     // know which sources the user has even when semantic search
     // doesn't surface them.
     let (attached_docs, mcp_servers, kb_chunks, library_inventory, (locale, default_domain)) = tokio::join!(
-        load_attached_docs(&state, &user_id, &doc_ids, vision_ok, &pii_protected_ids, &tx),
+        load_attached_docs(
+            &state,
+            &user_id,
+            &doc_ids,
+            vision_ok,
+            &pii_protected_ids,
+            pii_threshold,
+            &tx,
+        ),
         discover_mcp_for_user(&state, &user_id),
         retrieve_kb_chunks(&state, &user_id, &chat_id, &last_user_query, kb_top_k),
         list_indexed_corpus_docs(&state, &user_id),

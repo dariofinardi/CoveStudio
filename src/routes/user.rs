@@ -27,6 +27,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/default-domain", get(get_default_domain).put(update_default_domain))
         .route("/enabled-domains", get(get_enabled_domains).put(update_enabled_domains))
         .route("/hyde-enabled", get(get_hyde_enabled).put(update_hyde_enabled))
+        .route("/pii-threshold", get(get_pii_threshold).put(update_pii_threshold))
         // v0.5.6 "Modalità sicura locale" plug-and-play endpoints.
         // The frontend Settings UI hits these to (a) detect whether
         // Ollama is reachable on loopback, (b) enumerate the curated
@@ -312,6 +313,95 @@ async fn update_hyde_enabled(
         body.hyde_enabled,
     );
     Ok(Json(json!({ "ok": true, "hyde_enabled": body.hyde_enabled })))
+}
+
+// ---------------------------------------------------------------------------
+// GET /user/pii-threshold  →  { pii_threshold: f64 }
+// PUT /user/pii-threshold  body { pii_threshold: f64 }
+//
+// Confidence threshold of the PII detector (migration 0035). A span is
+// masked when the model scores it at or above this value, so a lower
+// number masks more text and accepts more false positives. The UI
+// presents it as a slider in Settings → Sicurezza, worded by effect
+// ("mask more" / "mask only what is certain") rather than by number,
+// because the number alone means nothing to the person reading it.
+//
+// What this does NOT control: how broadly a detected value is replaced.
+// Every literal occurrence of a masked value is replaced throughout the
+// document, whatever the threshold — a deliberate over-masking pass on
+// top of the detector's own spans, so a name the model catches once is
+// not left in clear text three paragraphs later.
+// ---------------------------------------------------------------------------
+
+/// Bounds of the slider. Below 0.05 the detector marks almost every
+/// capitalised word; above 0.95 it masks nothing at all, and a document
+/// the user explicitly asked to protect would come back untouched —
+/// both ends are worse than useless, so the range stops short of them.
+pub const PII_THRESHOLD_MIN: f64 = 0.05;
+pub const PII_THRESHOLD_MAX: f64 = 0.95;
+/// The model's calibrated default; see migration 0035 for why the old
+/// hard-coded 0.2 does not carry over.
+pub const PII_THRESHOLD_DEFAULT: f64 = 0.5;
+
+/// Reads the user's threshold, falling back to the default when the row
+/// is missing or holds something out of range (a hand-edited database).
+pub async fn fetch_pii_threshold(db: &sqlx::SqlitePool, user_id: &str) -> f64 {
+    let row: Option<(f64,)> = sqlx::query_as(
+        "SELECT pii_threshold FROM user_settings WHERE user_id = ?",
+    )
+    .bind(user_id)
+    .fetch_optional(db)
+    .await
+    .ok()
+    .flatten();
+    row.map(|(v,)| v)
+        .filter(|v| v.is_finite() && *v >= PII_THRESHOLD_MIN && *v <= PII_THRESHOLD_MAX)
+        .unwrap_or(PII_THRESHOLD_DEFAULT)
+}
+
+async fn get_pii_threshold(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+) -> ApiResult {
+    let value = fetch_pii_threshold(&state.db, &auth.user_id).await;
+    Ok(Json(json!({
+        "pii_threshold": value,
+        "min": PII_THRESHOLD_MIN,
+        "max": PII_THRESHOLD_MAX,
+        "default": PII_THRESHOLD_DEFAULT,
+    })))
+}
+
+#[derive(Deserialize)]
+struct UpdatePiiThresholdBody {
+    pii_threshold: f64,
+}
+
+async fn update_pii_threshold(
+    State(state): State<Arc<AppState>>,
+    auth: AuthUser,
+    Json(body): Json<UpdatePiiThresholdBody>,
+) -> ApiResult {
+    if !body.pii_threshold.is_finite() {
+        return Err(err(StatusCode::BAD_REQUEST, "pii_threshold must be a number"));
+    }
+    // Clamped rather than rejected: a slider that snaps back to a legal
+    // value is friendlier than one that errors, and the caller is told
+    // what was stored.
+    let value = body.pii_threshold.clamp(PII_THRESHOLD_MIN, PII_THRESHOLD_MAX);
+    sqlx::query(
+        "INSERT INTO user_settings (user_id, pii_threshold, updated_at)          VALUES (?, ?, datetime('now'))          ON CONFLICT(user_id) DO UPDATE SET pii_threshold = excluded.pii_threshold,              updated_at = datetime('now')",
+    )
+    .bind(&auth.user_id)
+    .bind(value)
+    .execute(&state.db)
+    .await
+    .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
+    tracing::info!(
+        "[user] PUT /pii-threshold user={} value={value}",
+        auth.user_id,
+    );
+    Ok(Json(json!({ "ok": true, "pii_threshold": value })))
 }
 
 // ---------------------------------------------------------------------------

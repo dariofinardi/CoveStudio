@@ -1310,7 +1310,14 @@
     "retrievalHydeEnabledToast": "HyDE ativado — o próximo turno de chat irá utilizá-lo",
     "retrievalHydeDisabledToast": "HyDE desativado — regresso à recuperação por cosseno puro",
     "retrievalLoadError": "Não foi possível carregar as configurações de recuperação: {err}",
-    "retrievalSaveError": "Não foi possível guardar a configuração de recuperação: {err}"
+    "retrievalSaveError": "Não foi possível guardar a configuração de recuperação: {err}",
+    "piiTitle": "Proteção de dados pessoais",
+    "piiThresholdLabel": "Prudência do mascaramento",
+    "piiThresholdMinLabel": "Mascarar mais",
+    "piiThresholdMaxLabel": "Apenas o que é certo",
+    "piiThresholdHint": "Limiar de confiança com que o modelo decide se um texto é um dado pessoal. Baixá-lo mascara mais texto e produz mais falsos positivos (um nome de empresa lido como pessoa); aumentá-lo deixa em claro os casos duvidosos. Um dado reconhecido é sempre mascarado em todas as suas ocorrências no documento.",
+    "piiThresholdSaved": "Definição guardada",
+    "piiThresholdSaveError": "Não foi possível guardar a definição"
   },
   "ColumnFormats": {
     "free_text": "Texto livre",

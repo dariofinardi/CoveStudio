@@ -1,76 +1,125 @@
-//! GLiNER2 engine singleton + entity extraction entry point.
+// Copyright (c) 2026 Dario Finardi. Licensed under AGPL-3.0-only.
+//! GLiNER2 engine lifecycle + the PII masking pass.
 //!
-//! Pattern mirrors `crate::audio::transcribe::get_or_load_context`:
-//! a process-wide `OnceLock<Mutex<Option<Arc<Gliner2Engine>>>>` so
-//! the first call pays the ~500 MB model load + the FP16
-//! WhisperContext-equivalent warmup, and every later call jumps
-//! straight to inference. Heavy work runs on
-//! `tokio::task::spawn_blocking` so the tokio worker pool stays
-//! responsive while long documents are scanned.
+//! The engine lives on **one dedicated OS thread** for the life of the
+//! process, and callers talk to it by message. That is not a style
+//! choice: `SpanEngine` is not `Send` (it holds an ONNX Runtime
+//! `MemoryInfo` pointer), so it can neither sit in a shared static nor
+//! cross into `spawn_blocking`. Owning it on a single thread also
+//! serialises inference for free — `extract_with` takes `&mut self` —
+//! and keeps a panic inside the model from poisoning a lock the rest of
+//! the application would then trip over.
 //!
-//! Cache layout: `hf-hub` (gliner2-rs transitive dep) drops the
-//! weights under `$HF_HOME/...`. We set `HF_HOME` to
-//! `%USERPROFILE%/cove-studio-data/gliner2/` at server startup so the
-//! ~500 MB model lives next to the other heavy artefacts (fastembed,
-//! whisper) and the Tauri watcher never sees it.
+//! Redaction happens in two steps, deliberately:
+//!
+//! 1. `gliner2_rs::privacy::redact` replaces each detected span by
+//!    offset, resolving overlaps in favour of the highest score (so
+//!    `Giuseppe Verdi` becomes `[FULL_NAME]`, not
+//!    `[FIRST_NAME] [LAST_NAME]`).
+//! 2. Our own pass then replaces **every remaining literal occurrence**
+//!    of each detected value. The model routinely tags a name on its
+//!    first appearance and misses the fourth; offset-only redaction
+//!    would leave that fourth one in clear text. For a tool whose
+//!    purpose is not leaking, masking a few false positives is the
+//!    cheaper mistake. The user tunes detection breadth with the
+//!    threshold in Settings → Sicurezza; this pass is not optional.
 
-use anyhow::{anyhow, Context, Result};
-use std::sync::{Arc, OnceLock};
-use tokio::sync::{Mutex, RwLock};
+use std::sync::mpsc;
+use std::sync::{Arc, OnceLock, RwLock};
 
-use gliner2_inference::{
-    ExtractedEntity, Gliner2Engine, InferenceParams, ModelType, SchemaTask,
+use anyhow::{anyhow, Result};
+use gliner2_rs::{
+    chain::ExecutionMode,
+    chunker::{self, Chunker},
+    privacy::{self, Group},
+    InferenceParams, SchemaTask, SpanConfig, SpanEngine, SpanOutput,
 };
+use tokio::sync::Mutex;
 
-/// Lower-than-default threshold for the GLiNER2 zero-shot scorer.
-/// gliner2-rs ships with 0.5; with multilingual PII labels on
-/// Italian medical text that suppresses most hits. 0.3 is the
-/// "show me everything reasonable, I'll over-mask rather than leak"
-/// trade-off the safer-by-default redaction needs.
-const PII_THRESHOLD: f32 = 0.2;
+/// Groups of the model's own PII vocabulary that we ask for. Labels
+/// compete *inside* a group, so one `SchemaTask` per group scores far
+/// better than one flat list of all 42 labels — that is the upstream
+/// recommendation, not a guess.
+///
+/// `DigitalIdentity`, `Secrets` and `SensitiveDates` are left out: they
+/// cover credentials, API keys and event dates, which in professional
+/// documents produce more noise than protection (a contract is made of
+/// dates). A caller that needs them passes explicit labels.
+const PII_GROUPS: &[Group] = &[
+    Group::Person,
+    Group::Contact,
+    Group::GovernmentId,
+    Group::Banking,
+];
 
-use super::labels::default_pii_labels;
+/// Labels outside the model's trained vocabulary that matter for
+/// Italian professional documents. They stay in a task of their own:
+/// zero-shot detection still works, but mixing out-of-distribution
+/// labels into a trained group degrades that group's own scores.
+const EXTRA_LABELS: &[&str] = &["codice fiscale", "partita IVA", "targa", "patient name"];
 
-/// Snapshot of where the GLiNER2 engine is in its lifecycle. We
-/// route through our own hf-hub-style downloader (`bootstrap.rs`)
-/// so the `Downloading` state can carry real bytes/total — the
-/// gliner2-rs `from_pretrained` is opaque on that front.
+/// Chunk geometry, in **words** — the engine counts words, not
+/// characters. The encoder has 512 positions and the schema markers
+/// share them with the text, so the window must leave room for the
+/// labels we send, and we send five tasks. 256/48 is the geometry the
+/// library documents for a schema this size; the previous 2000/200
+/// *characters* were tuned against a different engine.
+const CHUNK_WORDS: usize = 256;
+const CHUNK_OVERLAP_WORDS: usize = 48;
+
+/// Where the engine is in its lifecycle. Mirrors what
+/// `/sync/ner-status` renders, so the UI can show a real progress bar
+/// during the first download instead of an opaque spinner.
 #[derive(Debug, Clone)]
 pub enum NerStatus {
     /// No call has hit `ensure_engine` yet.
     Idle,
-    /// Manual HF resolve of the V2 model shards is in flight.
-    /// `total` is `None` when HEAD didn't surface Content-Length
-    /// (rare; the UI falls back to an indeterminate progress bar).
-    /// `file` is the current shard being streamed — `encoder` runs
-    /// for several minutes at 500 Mb/s WAN, every other shard is
-    /// short.
+    /// Manual HF resolve of the model shards is in flight. `total` is
+    /// `None` when HEAD didn't surface Content-Length (rare; the UI
+    /// falls back to an indeterminate bar). `file` is the shard being
+    /// streamed — `encoder` runs for minutes, the rest are short.
     Downloading {
         downloaded: u64,
         total: Option<u64>,
         file: String,
     },
-    /// Files are cached on disk and `Gliner2Engine::new` is
-    /// building the ort sessions. ~1-3 s on CPU.
+    /// Files are cached and the ort sessions are being built.
     Loading,
-    /// Engine is in memory; subsequent `mask_pii` calls jump
-    /// straight to inference.
+    /// Engine is in memory; later calls jump straight to inference.
     Ready,
-    /// Loading raised an error. UI shows the message; the next
-    /// `ensure_engine` call resets to Loading and tries again.
+    /// Loading raised an error. The next call retries.
     Failed { error: String },
 }
 
-/// Default HF model id for the privacy / PII task. Exported so
-/// `super::bootstrap` can resolve files against the same repo as
-/// `ensure_engine`. Pinned here so a future variant swap is a
-/// one-line change.
+/// HF model id and variant for the privacy / PII task. We keep the
+/// original repository rather than the library's new default
+/// (`jugaadsrl/…-onnx`): the weights already on disk came from here,
+/// the file names are identical, and switching would re-download
+/// 1.1 GB for nothing.
 pub(super) const PII_MODEL_ID: &str = "SemplificaAI/gliner2-privacy-filter-PII-multi";
 pub(super) const PII_MODEL_VARIANT: &str = "fp16_v2";
 
-/// Public reader used by the `/sync/ner-status` route.
+/// Public reader used by the `/sync/ner-status` route. Kept `async` for
+/// its callers' sake; the lock itself is synchronous because the engine
+/// thread — which lives outside the tokio runtime — writes it.
 pub async fn status() -> NerStatus {
-    status_cell().read().await.clone()
+    read_status()
+}
+
+fn read_status() -> NerStatus {
+    status_cell()
+        .read()
+        .map(|g| g.clone())
+        // A poisoned lock means some thread panicked while writing the
+        // status, not that the engine is unusable; reporting Idle lets
+        // the next call retry instead of wedging the feature.
+        .unwrap_or(NerStatus::Idle)
+}
+
+fn set_status(next: NerStatus) {
+    if let Ok(mut g) = status_cell().write() {
+        *g = next;
+    }
 }
 
 fn status_cell() -> &'static RwLock<NerStatus> {
@@ -78,418 +127,452 @@ fn status_cell() -> &'static RwLock<NerStatus> {
     CELL.get_or_init(|| RwLock::new(NerStatus::Idle))
 }
 
-/// A single PII / named-entity span. We expose only `label`, `score`
-/// and the literal extracted `text` because gliner2-rs v0.5.0
-/// `ExtractedEntity` carries **token** offsets (`start_tok` /
-/// `end_tok`), not byte/char offsets — re-aligning tokens to char
-/// positions would require holding the tokenizer alongside the
-/// engine. For PII redaction (the only consumer in Phase 1) the
-/// text is sufficient: we do a global string replace below. A future
-/// char-offset API can come back via a tokenizer alignment pass.
+/// A single detected span. Carries real offsets now — the previous
+/// engine exposed token indices only, which is why redaction used to
+/// work on literal text alone.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Entity {
     pub label: String,
     pub score: f32,
     pub text: String,
+    /// Byte offsets into the text that was passed in, half-open.
+    pub start: usize,
+    pub end: usize,
 }
 
-/// Top-level extraction entry point. `labels = None` uses the
-/// canonical PII set in `labels.rs`; `Some(&[...])` lets the caller
-/// scope detection (e.g. only banking identifiers for a contract
-/// redaction workflow).
+/// Progress callback: `(current_chunk, total_chunks)`, called from the
+/// engine thread as each chunk completes. The chat send path turns
+/// these into `pii_redact_progress` SSE events.
+pub type ProgressFn = Arc<dyn Fn(usize, usize) + Send + Sync + 'static>;
+
+/// Tasks handed to the model: one per trained group, plus our
+/// out-of-distribution extras. `labels = Some(...)` replaces the whole
+/// set with a single caller-scoped task.
+fn tasks_for(labels: Option<Vec<String>>) -> Vec<SchemaTask> {
+    if let Some(custom) = labels {
+        return vec![SchemaTask::Entities(custom)];
+    }
+    let mut tasks: Vec<SchemaTask> = PII_GROUPS.iter().map(|g| g.task()).collect();
+    tasks.push(SchemaTask::Entities(
+        EXTRA_LABELS.iter().map(|s| s.to_string()).collect(),
+    ));
+    tasks
+}
+
+fn params_for(threshold: f32) -> InferenceParams {
+    InferenceParams {
+        threshold,
+        // `flat_ner: false` keeps overlapping labels alive; the
+        // redaction pass resolves them by score. `overlap_policy` stays
+        // at its default, which matches the reference implementation.
+        flat_ner: false,
+        ..Default::default()
+    }
+}
+
+/// One inference request for the engine thread.
+struct Job {
+    text: String,
+    tasks: Vec<SchemaTask>,
+    threshold: f32,
+    progress: Option<ProgressFn>,
+    reply: tokio::sync::oneshot::Sender<Result<SpanOutput>>,
+}
+
+/// Handle on the thread that owns the engine.
+#[derive(Clone)]
+struct EngineHandle {
+    jobs: mpsc::Sender<Job>,
+}
+
+impl EngineHandle {
+    async fn run(
+        &self,
+        text: String,
+        tasks: Vec<SchemaTask>,
+        threshold: f32,
+        progress: Option<ProgressFn>,
+    ) -> Result<SpanOutput> {
+        let (reply, reply_rx) = tokio::sync::oneshot::channel();
+        self.jobs
+            .send(Job {
+                text,
+                tasks,
+                threshold,
+                progress,
+                reply,
+            })
+            .map_err(|_| anyhow!("ner engine thread is gone"))?;
+        reply_rx
+            .await
+            .map_err(|_| anyhow!("ner engine dropped the request without answering"))?
+    }
+}
+
+/// Detected spans, without redacting. `labels = None` uses the PII
+/// groups above.
 pub async fn extract_entities(
     text: &str,
     labels: Option<&[&str]>,
+    threshold: f32,
 ) -> Result<Vec<Entity>> {
     let engine = ensure_engine().await?;
-    let owned_labels: Vec<String> = labels
-        .map(|l| l.iter().map(|s| s.to_string()).collect())
-        .unwrap_or_else(|| {
-            default_pii_labels()
-                .iter()
-                .map(|s| s.to_string())
-                .collect()
-        });
-    let text_owned = text.to_string();
-
-    tokio::task::spawn_blocking(move || run_pass(engine, &text_owned, owned_labels))
-        .await
-        .map_err(|e| anyhow!("ner task join: {e:?}"))?
+    let tasks = tasks_for(labels.map(|l| l.iter().map(|s| s.to_string()).collect()));
+    let output = engine.run(text.to_string(), tasks, threshold, None).await?;
+    Ok(output
+        .entities
+        .into_iter()
+        .map(|e| Entity {
+            label: e.label,
+            score: e.score,
+            text: e.text,
+            start: e.char_start,
+            end: e.char_end,
+        })
+        .collect())
 }
 
-/// GLiNER2's context window (characters). Documents longer than this
-/// would be silently truncated by the model — we chunk client-side
-/// and stitch entity spans back into a single redaction pass over
-/// the original full text.
-pub const GLINER2_WINDOW_CHARS: usize = 2000;
-
-/// Overlap between adjacent chunks. Catches entities that straddle a
-/// chunk boundary (e.g. a name split in two by an unlucky cut). A
-/// 200-char overlap is generous given typical PII spans (5-60 chars)
-/// and survives most boundary cases without inflating the inference
-/// cost meaningfully.
-pub const GLINER2_OVERLAP_CHARS: usize = 200;
-
-/// Progress callback: `(current_chunk, total_chunks)`. Called inside
-/// the blocking worker every time a chunk inference completes; the
-/// chat send path uses it to emit `pii_redact_progress` SSE events
-/// so the UI can render `n / N` against a long document.
-/// `Send + Sync + 'static` to cross the `spawn_blocking` boundary.
-pub type ProgressFn = Arc<dyn Fn(usize, usize) + Send + Sync + 'static>;
-
-/// Convenience pipeline: extract PII spans across every chunk of the
-/// input text, dedupe across overlap regions, then run the upstream
-/// `mask_pii_text` once on the *original* text so the offsets stay
-/// authoritative. Output: a redacted copy of `text` with every span
-/// replaced by `[LABEL]` (e.g. `[PERSON]`, `[EMAIL]`).
+/// Masks every detected value in `text` and returns the redacted copy.
 ///
-/// `labels = None` uses the canonical PII set; pass a custom subset
-/// to narrow the redaction (e.g. `&["fiscal_code","iban"]` only).
+/// `threshold` is the user's setting (`user_settings.pii_threshold`,
+/// migration 0035): lower masks more. `labels = None` uses the PII
+/// groups; pass a subset to narrow the pass.
 ///
-/// Long documents (PDFs of dozens of pages, audio transcripts of an
-/// hour) safely route through this entry point — chunking is
-/// transparent. The whole pass runs on `spawn_blocking` so the tokio
-/// runtime stays responsive while a several-MB document is processed.
+/// Long documents are chunked transparently, and the work happens on
+/// the engine thread, so a multi-MB document never stalls the runtime.
 pub async fn mask_pii(
     text: &str,
     labels: Option<&[&str]>,
+    threshold: f32,
     progress: Option<ProgressFn>,
 ) -> Result<String> {
     let engine = ensure_engine().await?;
-    let owned_labels: Vec<String> = labels
-        .map(|l| l.iter().map(|s| s.to_string()).collect())
-        .unwrap_or_else(|| {
-            default_pii_labels()
-                .iter()
-                .map(|s| s.to_string())
-                .collect()
-        });
-    let text_owned = text.to_string();
-
-    tokio::task::spawn_blocking(move || {
-        let chunks = chunk_for_window(
-            &text_owned,
-            GLINER2_WINDOW_CHARS,
-            GLINER2_OVERLAP_CHARS,
-        );
-        if chunks.len() > 1 {
-            tracing::info!(
-                "[ner] chunking {} chars into {} windows of {} (overlap {})",
-                text_owned.len(),
-                chunks.len(),
-                GLINER2_WINDOW_CHARS,
-                GLINER2_OVERLAP_CHARS,
-            );
-        }
-        let total = chunks.len();
-        let tasks = vec![SchemaTask::Entities(owned_labels)];
-        let mut all_entities: Vec<ExtractedEntity> = Vec::new();
-        let pass_started_at = std::time::Instant::now();
-        tracing::info!(
-            "[ner] PII pass started — {} chunk(s) over {} chars",
-            total,
-            text_owned.len()
-        );
-        for (i, chunk) in chunks.iter().enumerate() {
-            // Tick BEFORE the inference so the UI shows "1/N starting"
-            // immediately rather than after the first chunk finishes
-            // (per-chunk latency can be hundreds of ms each).
-            if let Some(cb) = &progress {
-                cb(i + 1, total);
-            }
-            let chunk_text = &text_owned[chunk.start..chunk.end];
-            let chunk_started_at = std::time::Instant::now();
-            tracing::info!(
-                "[ner] chunk {}/{} → extracting ({} chars)",
-                i + 1,
-                total,
-                chunk.end - chunk.start
-            );
-            // gliner2-rs `extract` takes (text, tasks, Option<params>).
-            // We pass `None` so the engine uses its default
-            // InferenceParams (threshold 0.5, flat_ner false). Future
-            // work: expose a per-call threshold in the public API.
-            let (entities, _r, _c) = engine
-                .extract(
-                    chunk_text,
-                    &tasks,
-                    Some(InferenceParams {
-                        threshold: PII_THRESHOLD,
-                        flat_ner: false,
-                    }),
-                )
-                .map_err(|e| anyhow!("gliner2 extract failed on chunk: {e:?}"))?;
-            for e in &entities {
-                tracing::info!(
-                    "[ner]     · entity label={:?} score={:.3} text={:?}",
-                    e.label,
-                    e.score,
-                    e.text
-                );
-            }
-            tracing::info!(
-                "[ner] chunk {}/{} ✓ {} entities in {:?}",
-                i + 1,
-                total,
-                entities.len(),
-                chunk_started_at.elapsed()
-            );
-            all_entities.extend(entities);
-        }
-        tracing::info!(
-            "[ner] PII pass done — {} entities total in {:?}",
-            all_entities.len(),
-            pass_started_at.elapsed()
-        );
-        Ok(redact_by_text(&text_owned, &all_entities))
-    })
-    .await
-    .map_err(|e| anyhow!("ner mask task join: {e:?}"))?
+    let tasks = tasks_for(labels.map(|l| l.iter().map(|s| s.to_string()).collect()));
+    let started_at = std::time::Instant::now();
+    let output = engine
+        .run(text.to_string(), tasks, threshold, progress)
+        .await?;
+    tracing::info!(
+        "[ner] PII pass done — {} spans in {:?} (threshold {threshold:.2})",
+        output.entities.len(),
+        started_at.elapsed()
+    );
+    // Step 1: offset-accurate redaction, overlaps resolved by score.
+    // `privacy::redact` would upper-case the label as it stands, which
+    // turns our multi-word extras into `[CODICE FISCALE]` next to the
+    // model's `[FULL_NAME]`. One shape for all of them.
+    let redacted = privacy::redact_with(text, &output.entities, |label| placeholder_for(label));
+    // Step 2: the occurrences the model did not tag.
+    Ok(mask_remaining_occurrences(redacted, &output.entities))
 }
 
-/// Globally replace every entity's literal text in `source` with
-/// `[LABEL]` (uppercase). Sort by length descending so a longer
-/// entity ("Mario Rossi") is masked before the shorter prefix
-/// ("Mario") that could otherwise hit the residual leftover. Dedup
-/// `(text, label)` pairs so the same span found in multiple
-/// overlapping chunks doesn't trigger redundant work. This is
-/// safer-by-default than offset-based replacement: if the same
-/// person name appears 5 times in the document and the model tagged
-/// only one occurrence, we still mask all 5 — the alternative
-/// (leaking 4 of them) is the wrong default for a redaction tool.
-///
-/// Limit: substring overmatch is possible (entity "Mar" hitting
-/// "Marathon"). For Phase 1 PII labels — person names, emails,
-/// fiscal codes, IBANs, phone numbers — this is rare. Phase 2 can
-/// add tokenizer-aligned char offsets for stricter span control.
-fn redact_by_text(source: &str, entities: &[ExtractedEntity]) -> String {
+/// The placeholder that replaces a detected value: the label in
+/// upper case, with spaces and hyphens folded to underscores so the
+/// model's own labels (`full_name`) and our multi-word extras
+/// (`codice fiscale`) read the same way in the redacted document.
+fn placeholder_for(label: &str) -> String {
+    let mut out = String::with_capacity(label.len() + 2);
+    out.push('[');
+    for ch in label.chars() {
+        match ch {
+            ' ' | '-' => out.push('_'),
+            c => out.extend(c.to_uppercase()),
+        }
+    }
+    out.push(']');
+    out
+}
+
+/// A detected value has to be at least this long before we mask it
+/// document-wide. Names, emails, IBANs and tax codes all clear it;
+/// initials and stray fragments do not, and replacing those everywhere
+/// would shred unrelated words.
+const MIN_GLOBAL_MASK_CHARS: usize = 4;
+
+/// Replaces every literal occurrence of a detected value that survived
+/// step 1, longest value first so `Mario Rossi` is masked before the
+/// bare `Mario` can claim part of it.
+fn mask_remaining_occurrences(mut text: String, entities: &[gliner2_rs::Entity]) -> String {
     use std::collections::HashSet;
-    let mut seen = HashSet::<(String, String)>::new();
-    let mut unique: Vec<(&str, &str)> = Vec::new();
+
+    let mut seen: HashSet<(&str, &str)> = HashSet::new();
+    let mut values: Vec<(&str, &str)> = Vec::new();
     for e in entities {
-        if e.text.trim().is_empty() {
+        let value = e.text.trim();
+        if value.chars().count() < MIN_GLOBAL_MASK_CHARS {
             continue;
         }
-        let key = (e.text.clone(), e.label.clone());
-        if seen.insert(key) {
-            unique.push((e.text.as_str(), e.label.as_str()));
+        if seen.insert((value, e.label.as_str())) {
+            values.push((value, e.label.as_str()));
         }
     }
-    // Longest-first so "Mario Rossi" gets the mask before "Mario"
-    // would catch it.
-    unique.sort_by_key(|(t, _)| std::cmp::Reverse(t.len()));
-    let mut out = source.to_string();
-    for (text, label) in unique {
-        let placeholder = format!("[{}]", label.to_uppercase());
-        // String::replace is a non-overlapping left-to-right pass;
-        // good enough for our single-pass redaction.
-        out = out.replace(text, &placeholder);
-    }
-    out
-}
+    values.sort_by_key(|(v, _)| std::cmp::Reverse(v.len()));
 
-/// One chunk window, in **byte** offsets into the source text.
-/// `start..end` is always on UTF-8 char boundaries and the chunk
-/// length never exceeds `window` chars.
-#[derive(Debug, Clone, Copy)]
-struct Chunk {
-    start: usize,
-    end: usize,
-}
-
-/// Split `text` into chunks of at most `window` characters with
-/// `overlap` characters of slide between adjacent chunks. We split
-/// at the nearest UTF-8 char boundary so a multi-byte character is
-/// never cut in half — `engine.extract` would otherwise panic on
-/// an invalid borrow.
-///
-/// For single-window inputs the returned slice is `[(0, text.len())]`
-/// and the caller skips the stitching path entirely.
-fn chunk_for_window(text: &str, window: usize, overlap: usize) -> Vec<Chunk> {
-    debug_assert!(window > overlap, "overlap must be strictly less than window");
-    if text.is_empty() {
-        return Vec::new();
-    }
-    if text.chars().count() <= window {
-        return vec![Chunk { start: 0, end: text.len() }];
-    }
-
-    // Walk char boundaries in steps of (window - overlap). Each
-    // chunk covers `window` chars from its start, until we run out
-    // of text. We track char positions and convert to byte offsets
-    // by walking `char_indices` — keeps everything boundary-safe.
-    let stride = window - overlap;
-    let mut out = Vec::new();
-    let total_chars = text.chars().count();
-    let mut start_char = 0usize;
-    while start_char < total_chars {
-        let end_char = (start_char + window).min(total_chars);
-        let start_byte = char_pos_to_byte(text, start_char);
-        let end_byte = char_pos_to_byte(text, end_char);
-        out.push(Chunk { start: start_byte, end: end_byte });
-        if end_char == total_chars {
-            break;
+    let mut replaced = 0usize;
+    for (value, label) in values {
+        if !text.contains(value) {
+            continue;
         }
-        start_char += stride;
+        let placeholder = placeholder_for(label);
+        text = text.replace(value, &placeholder);
+        replaced += 1;
     }
-    out
+    if replaced > 0 {
+        tracing::info!(
+            "[ner] over-masking pass replaced further occurrences of {replaced} value(s)"
+        );
+    }
+    text
 }
 
-/// Convert a char index into the corresponding byte offset. Linear
-/// scan — fine at our chunk sizes (~2000 chars), well below any
-/// hot path.
-fn char_pos_to_byte(text: &str, char_pos: usize) -> usize {
-    if char_pos == 0 {
-        return 0;
-    }
-    text.char_indices()
-        .nth(char_pos)
-        .map(|(b, _)| b)
-        .unwrap_or(text.len())
-}
-
-#[cfg(test)]
-mod chunk_tests {
-    use super::*;
-
-    #[test]
-    fn short_text_single_chunk() {
-        let text = "Mario Rossi, mario@example.com";
-        let chunks = chunk_for_window(text, 2000, 200);
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].start, 0);
-        assert_eq!(chunks[0].end, text.len());
-    }
-
-    #[test]
-    fn long_text_chunks_with_overlap() {
-        let text = "a".repeat(5000);
-        let chunks = chunk_for_window(&text, 2000, 200);
-        // 5000 chars, stride 1800: starts at 0, 1800, 3600 → 3 chunks.
-        assert_eq!(chunks.len(), 3);
-        assert_eq!(chunks[0].start, 0);
-        assert_eq!(chunks[0].end, 2000);
-        assert_eq!(chunks[1].start, 1800);
-        assert_eq!(chunks[1].end, 3800);
-        assert_eq!(chunks[2].start, 3600);
-        assert_eq!(chunks[2].end, 5000);
-    }
-
-    #[test]
-    fn respects_utf8_boundaries() {
-        // 4-byte emoji at every position — char_count == 1000,
-        // byte_len == 4000. Window of 500 chars produces chunks
-        // aligned on char boundaries, never on a byte mid-emoji.
-        let emoji = "🚀".repeat(1000);
-        let chunks = chunk_for_window(&emoji, 500, 50);
-        for c in &chunks {
-            assert!(emoji.is_char_boundary(c.start));
-            assert!(emoji.is_char_boundary(c.end));
-        }
-    }
-
-    #[test]
-    fn empty_text_returns_no_chunks() {
-        assert!(chunk_for_window("", 2000, 200).is_empty());
-    }
-}
-
+/// Runs the model over `text`, chunking when needed. Reproduces
+/// `SpanEngine::extract_long_with` so we can tick `progress` between
+/// chunks — the library's own loop has no hook — while reusing its
+/// public `remap` / `merge`, because hand-rolling seam handling is how
+/// entities get lost.
 fn run_pass(
-    engine: Arc<Gliner2Engine>,
+    engine: &mut SpanEngine,
     text: &str,
-    labels: Vec<String>,
-) -> Result<Vec<Entity>> {
-    // Chunk so long inputs don't get silently truncated by the
-    // model's ~2000-char context window. Mirror of the `mask_pii`
-    // codepath above; we just collect entities here instead of
-    // running the text-replace pass.
-    let chunks = chunk_for_window(text, GLINER2_WINDOW_CHARS, GLINER2_OVERLAP_CHARS);
-    let tasks = vec![SchemaTask::Entities(labels)];
-    let mut out: Vec<Entity> = Vec::new();
-    for chunk in &chunks {
-        let chunk_text = &text[chunk.start..chunk.end];
-        let (entities, _r, _c) = engine
-            .extract(
-                chunk_text,
-                &tasks,
-                Some(InferenceParams {
-                    threshold: PII_THRESHOLD,
-                    flat_ner: false,
-                }),
-            )
-            .map_err(|e| anyhow!("gliner2 extract failed: {e:?}"))?;
-        for e in entities {
-            out.push(Entity {
-                label: e.label,
-                score: e.score,
-                text: e.text,
-            });
+    tasks: &[SchemaTask],
+    threshold: f32,
+    progress: Option<ProgressFn>,
+) -> Result<SpanOutput> {
+    let params = params_for(threshold);
+    let chunker = Chunker::new(CHUNK_WORDS, CHUNK_OVERLAP_WORDS)
+        .map_err(|e| anyhow!("chunker {CHUNK_WORDS}/{CHUNK_OVERLAP_WORDS}: {e:?}"))?;
+    let chunks = chunker
+        .split(text)
+        .map_err(|e| anyhow!("chunking failed: {e:?}"))?;
+    let total = chunks.len().max(1);
+
+    if chunks.len() <= 1 {
+        if let Some(cb) = &progress {
+            cb(1, 1);
         }
+        return engine
+            .extract_with(text, tasks, &params)
+            .map_err(|e| anyhow!("gliner2 extract failed: {e:?}"));
     }
-    Ok(out)
+
+    tracing::info!(
+        "[ner] PII pass — {total} chunk(s) of {CHUNK_WORDS} words (overlap {CHUNK_OVERLAP_WORDS}) over {} chars",
+        text.len()
+    );
+    let mut parts = Vec::with_capacity(chunks.len());
+    for (i, chunk) in chunks.iter().enumerate() {
+        // Tick before inference so the UI shows "1/N" immediately
+        // rather than after the first chunk has finished.
+        if let Some(cb) = &progress {
+            cb(i + 1, total);
+        }
+        let started_at = std::time::Instant::now();
+        let mut part = engine
+            .extract_with(chunk.slice(text), tasks, &params)
+            .map_err(|e| anyhow!("gliner2 extract failed on chunk {}/{total}: {e:?}", i + 1))?;
+        // Offsets come back relative to the chunk; remap them onto the
+        // full text before merging.
+        chunker::remap(&mut part, chunk, text);
+        tracing::debug!(
+            "[ner] chunk {}/{total} ✓ {} spans in {:?}",
+            i + 1,
+            part.entities.len(),
+            started_at.elapsed()
+        );
+        parts.push(part);
+    }
+    Ok(chunker::merge(parts))
 }
 
-/// Lazy-loaded process-wide engine. Wraps the underlying
-/// `Gliner2Engine` in an `Arc` so the worker closure can move a
-/// clone into `spawn_blocking` without holding the mutex across the
-/// await. The mutex itself only protects the *creation* path; once
-/// the engine exists, every call goes through a cheap read.
-async fn ensure_engine() -> Result<Arc<Gliner2Engine>> {
-    static CELL: OnceLock<Mutex<Option<Arc<Gliner2Engine>>>> = OnceLock::new();
+/// Starts the engine thread on first use and hands back a handle;
+/// later calls reuse it. A failed load is not cached, so the next call
+/// retries — which matters when the failure was a half-finished
+/// download.
+async fn ensure_engine() -> Result<EngineHandle> {
+    static CELL: OnceLock<Mutex<Option<EngineHandle>>> = OnceLock::new();
     let cell = CELL.get_or_init(|| Mutex::new(None));
     let mut guard = cell.lock().await;
-    if let Some(engine) = guard.as_ref() {
-        // Already loaded by a previous call — make sure the status
-        // reflects that even if the lifecycle code was edited later.
-        *status_cell().write().await = NerStatus::Ready;
-        return Ok(engine.clone());
+    if let Some(handle) = guard.as_ref() {
+        set_status(NerStatus::Ready);
+        return Ok(handle.clone());
     }
     tracing::info!(
-        "[ner] loading GLiNER2 engine — model={} variant={}",
-        PII_MODEL_ID,
-        PII_MODEL_VARIANT
+        "[ner] loading GLiNER2 engine — model={PII_MODEL_ID} variant={PII_MODEL_VARIANT}"
     );
 
-    // Phase 1 — download. Our bootstrap publishes bytes/total so
-    // the UI can render a real progress bar (gliner2-rs's own
-    // `from_pretrained` is opaque). On a warm cache this returns
-    // immediately and sets status to Loading.
+    // Phase 1 — download, through our own resolver so the UI gets real
+    // bytes/total (the library's downloader only prints to stderr).
     let models_dir = match super::bootstrap::ensure_default_model().await {
         Ok(d) => d,
         Err(e) => {
-            let msg = format!("download failed: {e:#}");
-            *status_cell().write().await =
-                NerStatus::Failed { error: msg.clone() };
+            set_status(NerStatus::Failed {
+                error: format!("download failed: {e:#}"),
+            });
             return Err(e);
         }
     };
 
-    // Phase 2 — session build. `Gliner2Engine::new` autodetects V1
-    // vs V2 from the file names already on disk in models_dir.
-    *status_cell().write().await = NerStatus::Loading;
-    let config = gliner2_inference::Gliner2Config {
-        models_dir: models_dir.to_string_lossy().to_string(),
-        max_width: 8,
-        model_type: ModelType::HuggingFace,
-    };
-    let result = Gliner2Engine::new(config).with_context(|| {
-        format!(
-            "building GLiNER2 sessions from {}",
-            models_dir.display()
-        )
-    });
-    match result {
-        Ok(engine) => {
-            let arc = Arc::new(engine);
-            *guard = Some(arc.clone());
-            *status_cell().write().await = NerStatus::Ready;
-            Ok(arc)
+    // Phase 2 — build the sessions on the thread that will own them.
+    //
+    // Same hazard the embedding path documents: with `ORT_DYLIB_PATH`
+    // unset, `ort` resolves "onnxruntime.dll" by name and finds
+    // Windows' own copy in System32 (ORT 1.17.x, shipped with Windows
+    // ML), which rc.13 then rejects as `BadVersion`. The application
+    // sets the variable at startup, but this module must not depend on
+    // who called it first.
+    #[cfg(feature = "rag")]
+    crate::embeddings::service::ensure_onnxruntime_dylib_path();
+    #[cfg(not(feature = "rag"))]
+    if std::env::var_os("ORT_DYLIB_PATH").is_none() {
+        tracing::warn!(
+            "[ner] ORT_DYLIB_PATH is unset and this build has no `rag` feature to resolve it —              ort will look for onnxruntime.dll by name and may load the system copy"
+        );
+    }
+    set_status(NerStatus::Loading);
+    let (jobs_tx, jobs_rx) = mpsc::channel::<Job>();
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    std::thread::Builder::new()
+        .name("cove-ner".to_string())
+        .spawn(move || engine_thread(models_dir, jobs_rx, ready_tx))
+        .map_err(|e| anyhow!("spawning the ner engine thread: {e}"))?;
+
+    match ready_rx.await {
+        Ok(Ok(())) => {
+            let handle = EngineHandle { jobs: jobs_tx };
+            *guard = Some(handle.clone());
+            set_status(NerStatus::Ready);
+            Ok(handle)
+        }
+        Ok(Err(msg)) => {
+            set_status(NerStatus::Failed { error: msg.clone() });
+            Err(anyhow!(msg))
+        }
+        Err(_) => {
+            let msg = "ner engine thread died while loading the model".to_string();
+            set_status(NerStatus::Failed { error: msg.clone() });
+            Err(anyhow!(msg))
+        }
+    }
+}
+
+/// Body of the engine thread: build once, then serve jobs until every
+/// handle is dropped, which in practice means process shutdown.
+fn engine_thread(
+    models_dir: std::path::PathBuf,
+    jobs: mpsc::Receiver<Job>,
+    ready: tokio::sync::oneshot::Sender<Result<(), String>>,
+) {
+    // Execution mode is explicit on purpose. Left alone, the library
+    // reads `GLINER2_DEVICE` as "auto", concludes a device-memory
+    // provider is available and registers CUDA, then binds tensors to a
+    // device this machine may not have; ONNX Runtime falls back to CPU
+    // for compute while the binding is meaningless, and we would be
+    // relying on an error path to recover. Cove Studio runs its models
+    // on the CPU by design, so we say so.
+    let config = SpanConfig::new(&models_dir).with_execution(ExecutionMode::Standard);
+    let mut engine = match SpanEngine::new(config) {
+        Ok(e) => {
+            let _ = ready.send(Ok(()));
+            e
         }
         Err(e) => {
-            let msg = format!("{e:#}");
-            *status_cell().write().await =
-                NerStatus::Failed { error: msg.clone() };
-            Err(e)
+            let _ = ready.send(Err(format!(
+                "building GLiNER2 sessions from {}: {e:#}",
+                models_dir.display()
+            )));
+            return;
         }
+    };
+
+    while let Ok(job) = jobs.recv() {
+        let Job {
+            text,
+            tasks,
+            threshold,
+            progress,
+            reply,
+        } = job;
+        let result = run_pass(&mut engine, &text, &tasks, threshold, progress);
+        // A caller that gave up (disconnected client) simply drops the
+        // receiver; that is not worth logging loudly.
+        let _ = reply.send(result);
+    }
+    tracing::debug!("[ner] engine thread exiting — no handles left");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entity(text: &str, label: &str, start: usize) -> gliner2_rs::Entity {
+        gliner2_rs::Entity {
+            text: text.to_string(),
+            label: label.to_string(),
+            score: 0.9,
+            char_start: start,
+            char_end: start + text.len(),
+            word_start: 0,
+            word_end: 0,
+            slot: 0,
+            task: "entities".to_string(),
+        }
+    }
+
+    #[test]
+    fn over_masking_catches_untagged_repeats() {
+        // The model tagged the first occurrence only; the others must
+        // not survive.
+        let redacted = "[FULL_NAME] firmò. Mario Rossi confermò. Scritto da Mario Rossi.";
+        let out = mask_remaining_occurrences(
+            redacted.to_string(),
+            &[entity("Mario Rossi", "full_name", 0)],
+        );
+        assert!(!out.contains("Mario Rossi"), "{out}");
+        assert_eq!(out.matches("[FULL_NAME]").count(), 3);
+    }
+
+    #[test]
+    fn longest_value_is_masked_first() {
+        let out = mask_remaining_occurrences(
+            "Mario Rossi e Mario".to_string(),
+            &[
+                entity("Mario", "first_name", 0),
+                entity("Mario Rossi", "full_name", 0),
+            ],
+        );
+        assert_eq!(out, "[FULL_NAME] e [FIRST_NAME]");
+    }
+
+    #[test]
+    fn very_short_values_are_left_alone() {
+        // "MR" as initials would otherwise shred every word containing
+        // those letters.
+        let out =
+            mask_remaining_occurrences("MR MRI MRS".to_string(), &[entity("MR", "person", 0)]);
+        assert_eq!(out, "MR MRI MRS");
+    }
+
+    #[test]
+    fn placeholders_have_one_shape() {
+        assert_eq!(placeholder_for("full_name"), "[FULL_NAME]");
+        assert_eq!(placeholder_for("codice fiscale"), "[CODICE_FISCALE]");
+        assert_eq!(placeholder_for("date-of-birth"), "[DATE_OF_BIRTH]");
+        // Accented labels are not expected, but must not be dropped.
+        assert_eq!(placeholder_for("città"), "[CITTÀ]");
+    }
+
+    #[test]
+    fn nothing_to_mask_leaves_text_untouched() {
+        let out = mask_remaining_occurrences("Testo pulito".to_string(), &[]);
+        assert_eq!(out, "Testo pulito");
+    }
+
+    #[test]
+    fn default_tasks_cover_the_trained_groups_plus_extras() {
+        assert_eq!(tasks_for(None).len(), PII_GROUPS.len() + 1);
+    }
+
+    #[test]
+    fn custom_labels_replace_the_whole_schema() {
+        assert_eq!(tasks_for(Some(vec!["iban".to_string()])).len(), 1);
     }
 }

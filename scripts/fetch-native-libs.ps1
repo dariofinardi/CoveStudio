@@ -10,7 +10,7 @@
   Pins to exact versions so the binary the user installs is the one
   every build was tested against:
 
-    onnxruntime  1.20.0     (matches `ort = "=2.0.0-rc.9"` in Cargo.toml
+    onnxruntime  1.28.2     (matches `ort = "=2.0.0-rc.13"` in Cargo.toml
                              — anything else deadlocks try_new silently
                              per libs/onnxruntime/README.md)
     pdfium       chromium/7834
@@ -52,7 +52,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Pinned versions — keep in sync with Cargo.toml / HISTORY.md.
-$OnnxVersion = '1.20.0'
+$OnnxVersion = '1.28.2'
 $PdfiumTag   = 'chromium/7834'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot

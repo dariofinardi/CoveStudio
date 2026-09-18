@@ -1310,7 +1310,14 @@
     "retrievalHydeEnabledToast": "HyDE activé — le prochain tour de chat l'utilisera",
     "retrievalHydeDisabledToast": "HyDE désactivé — retour à la récupération par cosinus pur",
     "retrievalLoadError": "Impossible de charger les paramètres de récupération : {err}",
-    "retrievalSaveError": "Impossible d'enregistrer le paramètre de récupération : {err}"
+    "retrievalSaveError": "Impossible d'enregistrer le paramètre de récupération : {err}",
+    "piiTitle": "Protection des données personnelles",
+    "piiThresholdLabel": "Prudence du masquage",
+    "piiThresholdMinLabel": "Masquer davantage",
+    "piiThresholdMaxLabel": "Seulement ce qui est certain",
+    "piiThresholdHint": "Seuil de confiance avec lequel le modèle décide si un texte est une donnée personnelle. L’abaisser masque davantage de texte et produit plus de faux positifs (un nom d’entreprise pris pour une personne) ; l’élever laisse en clair les cas douteux. Une donnée reconnue est de toute façon masquée à chacune de ses occurrences dans le document.",
+    "piiThresholdSaved": "Réglage enregistré",
+    "piiThresholdSaveError": "Impossible d’enregistrer le réglage"
   },
   "ColumnFormats": {
     "free_text": "Texte libre",

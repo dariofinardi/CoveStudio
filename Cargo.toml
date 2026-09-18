@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "cove-studio"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 description = "Cove Studio — private, local AI assistant for professional document work"
 
@@ -46,34 +46,38 @@ sha2 = "0.10"
 # text. Optional feature gate so devs without ort/onnxruntime libs can
 # still build the rest of Cove Studio.
 #
-# Dynamic-load mode targeting onnxruntime 1.24.2 (the version ort
-# 2.0.0-rc.12 statically links against — confirmed via the
-# `branch=rel-1.24.2` strings baked in by pyke's CI). Two earlier
-# attempts hung on the wrong DLL version (1.20.0 stock) because of
-# ABI drift: 1.24.x added IO-binding APIs / plugin-EP runtime that
-# 1.20.x doesn't export, and ort's dyloader deadlocks silently when
-# a function-pointer lookup misses. Vendored DLLs in
-# `libs/onnxruntime/{win-arm64,win-x64}/` must be Microsoft's
-# official **v1.20.0** release archives — same ABI ort-sys-rc.9
-# baked in (ORT 1.24.x DLLs deadlock TextEmbedding::try_new silently).
+# Dynamic-load mode targeting onnxruntime **1.28.2**. The version is
+# not a free choice: fastembed 5.x declares `ort/api-24`, so the DLL
+# must export API level 24 or higher (1.24+). Mismatches do not fail
+# cleanly — ort's dyloader deadlocks silently when a function-pointer
+# lookup misses, which is how two earlier attempts were lost. Vendored
+# DLLs in `libs/onnxruntime/{win-arm64,win-x64}/` must be Microsoft's
+# official v1.28.2 archives; `scripts/fetch-native-libs.ps1` pins the
+# same number.
 #
-# We are deliberately back on the rc.9 line: the upcoming
-# data-security / privacy feature relies on the smaller, audited
-# 1.20.0 runtime surface and on EP set that ships with it. See
-# HISTORY.md (2026-05-20) for context.
-fastembed = { version = "=4.9.1", optional = true, default-features = false, features = [
+# Why we left the rc.9 / 1.20.0 line we had deliberately chosen: the
+# OCR pipeline for scanned PDFs (paddle-ocr-rs) and the redesigned
+# GLiNER2 crate both require ort rc.13, and a process can host exactly
+# one ONNX Runtime. Release candidates 10 to 12 were rejected upstream
+# because some models hung during session initialisation on ARM; rc.13
+# is the first since rc.9 that runs them, and it was validated on
+# win-arm64 in the pageindex-local-rs project before this move. The
+# same project measured rc.13 + ONNX 1.28.2 against rc.9 + 1.20.1:
+# retrieval quality equivalent, CPU latency better. See HISTORY.md.
+fastembed = { version = "=5.17.4", optional = true, default-features = false, features = [
     "hf-hub-native-tls",
     "ort-load-dynamic",
 ] }
 # Direct dep on the same ort version fastembed pulls transitively so
 # we can configure execution providers (DirectML on Windows GPUs, QNN
 # on Qualcomm Snapdragon NPUs) without forking fastembed. Cargo
-# deduplicates: there's a single ort 2.0.0-rc.9 in the build.
+# deduplicates: there's a single ort 2.0.0-rc.13 in the build.
 #
 # `load-dynamic` enabled: onnxruntime.dll lives in
 # `libs/onnxruntime/<platform>/` and is loaded at runtime via
 # `ORT_DYLIB_PATH`. No static link.
-ort = { version = "=2.0.0-rc.9", optional = true, default-features = false, features = [
+ort = { version = "=2.0.0-rc.13", optional = true, default-features = false, features = [
+    "std",
     "load-dynamic",
 ] }
 # Vector store via the sqlite-vec extension. Same SQLite file as the
@@ -114,8 +118,22 @@ regex = "1"
 # docs/gliner2-pii-plan.md for the pipeline shape and the
 # Gliner2Engine API the crate exposes.
 # ------------------------------------------------------------------
-gliner2_inference = { git = "https://github.com/SemplificaAI/gliner2-rs", tag = "v0.5.1", optional = true }
-half              = { version = "2.4", optional = true }
+# `gliner2-rs` 0.9.6 from crates.io (Apache-2.0), the redesigned
+# successor of `gliner2_inference` 0.5.1: one crate, ort rc.13, and the
+# PII vocabulary, chunker and redaction helpers included. The exact pin
+# is deliberate — an application wants a fixed floor and ceiling, and
+# this crate's own manifest explains why a caret on ort is a calculated
+# risk for a library and not for us.
+#
+# `default-features = false` drops `guardrails` (unused) and `hub`: we
+# download the weights ourselves in `src/ner/bootstrap.rs` to publish
+# real byte/total progress, which the crate's downloader cannot do.
+# `privacy` brings the 42-label vocabulary and the offset-accurate
+# `redact`; see `src/ner/engine.rs` for the over-masking pass we add on
+# top of it.
+gliner2-rs = { version = "=0.9.6", optional = true, default-features = false, features = [
+    "privacy",
+] }
 
 # ------------------------------------------------------------------
 # PDF extraction — pdfium-render (bundled dll in libs/pdfium/)
@@ -247,8 +265,7 @@ rag = [
 # the inference — no additional native deps. See
 # docs/gliner2-pii-plan.md.
 ner-pii = [
-    "dep:gliner2_inference",
-    "dep:half",
+    "dep:gliner2-rs",
     "dep:ort",
 ]
 # Hardware-accelerated embedding inference via ONNX Runtime execution
@@ -397,6 +414,7 @@ windows = { version = "0.61", features = [
 # numbers in stack traces (which is what we actually need for dev) without
 # emitting variable + type debug records.
 debug = "line-tables-only"
+
 
 [profile.release]
 opt-level = 3
