@@ -16,6 +16,52 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.9.1 — 2026-09-18 (one funnel for document onboarding)
+
+Every file now enters Cove Studio through a single boundary,
+`src/ingest/`, built on **`pageindex-rs`** (Apache-2.0). It replaces
+three separate extractors keyed on different things and failing three
+different ways: one returned a skip reason, one discarded the error, one
+turned it into an empty string.
+
+### Added
+
+* **Format detection and extraction** for PDF (native text layer, with
+  a pdfium fallback), DOCX, Markdown, plain text, and — new — the
+  Office and legacy family: `.doc`, `.ppt`, `.rtf` and spreadsheets,
+  converted through the library. `.doc` and `.ppt` were silently
+  unsupported before.
+* The **defaced pre-check**: a PDF whose text layer disagrees with what
+  is printed (tampered `cmap`/`ToUnicode`, private-use or zero-width
+  characters). For legal documents the extracted text saying something
+  the reader never sees is a real risk, not a curiosity.
+* A **section tree with page numbers**, from which the `[Page N]`
+  markers are rendered. The markers now derive from structure instead
+  of being pasted onto the text, and a test asserts they are monotonic
+  and never duplicated — nothing guaranteed that before, and a citation
+  could point at the wrong page unnoticed.
+
+### Notes
+
+* The library's archive (DuckDB with hybrid retrieval) is deliberately
+  left out with `default-features = false`: vectors live in sqlite-vec.
+  That split was made upstream for this integration.
+* The boundary is the only place that knows the library: it maps its
+  `PAGEINDEX_*` variables and working-directory model paths onto Cove
+  Studio's own conventions, and absorbs its vocabulary — the library
+  reports every spreadsheet as `sheet`, while `documents.file_type`
+  distinguishes `xlsx` from `xls`, `xlsb` and `ods`, and the viewer and
+  the tabular workflows branch on it.
+* Dependency debug info is off in the dev profile: line tables across
+  ~400 crates were enough to exceed the MSVC `.pdb` module limit
+  (`LNK1140`). Our own crates keep theirs.
+* Verified: 16 unit tests on the boundary, 13 functional tests on real
+  files — the three PDFs in `tests/medical`, a DOCX written by Cove
+  Studio's own writer, a spreadsheet, an RTF, Markdown, plain text, an
+  empty file, a corrupt one, an unsupported one, a missing one.
+
+---
+
 ## v0.9.0 — 2026-09-18 (one ONNX Runtime: ort rc.13, and PII rebuilt on gliner2-rs)
 
 The process can host exactly one ONNX Runtime, and three things now want

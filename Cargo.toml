@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "cove-studio"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2024"
 description = "Cove Studio — private, local AI assistant for professional document work"
 
@@ -134,6 +134,30 @@ regex = "1"
 gliner2-rs = { version = "=0.9.6", optional = true, default-features = false, features = [
     "privacy",
 ] }
+
+# ------------------------------------------------------------------
+# Document onboarding — pageindex-rs (Apache-2.0, dariofinardi).
+#
+# One funnel for every format: detection, native text extraction, the
+# "defaced" pre-check (a PDF whose text layer disagrees with what is
+# printed — tampered cmap/ToUnicode), Office/legacy conversion, and the
+# hierarchical section tree with page numbers. Cove Studio had three
+# divergent extractors with three different failure behaviours; this
+# replaces all of them behind `src/ingest/`.
+#
+# `default-features = false` leaves DuckDB out: the library's archive
+# (`store` + `indexer`) is not ours — vectors live in sqlite-vec. That
+# split exists upstream because of this integration; see the feature
+# table in the library's README. OCR arrives in the next phase behind
+# its own feature.
+#
+# Pinned by revision, not by branch: this is an application, and the
+# extraction path is where silent behaviour changes hurt most. It shares
+# `ort` 2.0.0-rc.13, `fastembed` 5.17.4 and `pdfium-render` 0.8.37 with
+# us, so cargo keeps a single copy of each and one ONNX Runtime in the
+# process.
+# ------------------------------------------------------------------
+pageindex-rs = { git = "https://github.com/dariofinardi/pageindex-local-rs", rev = "f884548d55deb37865bd6ca887068e9eb4662849", default-features = false }
 
 # ------------------------------------------------------------------
 # PDF extraction — pdfium-render (bundled dll in libs/pdfium/)
@@ -415,6 +439,14 @@ windows = { version = "0.61", features = [
 # emitting variable + type debug records.
 debug = "line-tables-only"
 
+# The same cap was hit again once the onboarding funnel pulled in
+# pageindex-rs (and with it arrow, parquet, pdf-extract, chk_defaced and
+# the Office converter): line tables alone, across ~400 dependency
+# crates, are enough to exceed the .pdb module limit. Debug info for
+# *dependencies* buys nothing when the bug is in our code, so it goes —
+# our own crates keep their line tables and stack traces stay readable.
+[profile.dev.package."*"]
+debug = false
 
 [profile.release]
 opt-level = 3
