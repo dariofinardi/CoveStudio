@@ -16,6 +16,53 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.9.2 — 2026-09-18 (a document says whether it could be read)
+
+Uploads used to be stored as `ready` whatever extraction produced. A
+password-protected PDF, an image-only DOCX, a file whose extension
+lied: the row said ready, the prompt received an empty block, and the
+assistant answered with confidence about a document nobody had read.
+The only trace was a line in the server log.
+
+### Added
+
+* `documents.status` now carries the verdict — `ready`, `no_text` or
+  `failed` — and `extraction_reason` (migration 0036) the sentence that
+  explains it, phrased for the person who attached the file rather than
+  for the log. `POST /document` returns both, so the composer can say
+  so immediately.
+* A protected PDF is recognised as such and told what to do about it;
+  an unsupported format, a corrupt container and an unreadable file are
+  distinguished rather than collapsed into silence. An unrecognised
+  failure keeps the original message: a technical sentence the user can
+  paste into a report beats a tidy one that hides which file broke.
+
+### Fixed
+
+* **The cache key collided with itself.** For a `.txt` or `.md` upload
+  the binary and the extracted text resolved to the *same* path
+  (`cache/<hash>.txt`), so writing the binary made the text look
+  already-extracted and the extraction step was skipped. Harmless while
+  every row said `ready`; it surfaced the moment the verdict became
+  real. The text now lands in `cache/<hash>.extracted.txt`, and older
+  caches stay readable because every document carries its own
+  `extracted_text_path`.
+* Re-uploading content that was already extracted took the verdict on
+  trust. It is now read back from the cached text: an empty extraction
+  meant the file was unreadable then and still is.
+
+### Notes
+
+* Verified: 5 functional tests on `POST /document` (ready, no_text with
+  a reason, failed, unsupported, and a real PDF whose cached text keeps
+  its page markers), plus the full suite green in parallel — 535 unit
+  tests and every integration suite.
+* The tests for this route hold a lock while they run: they set
+  `STORAGE_PATH`, which is process-global, and in parallel they wrote
+  into each other's temporary directory.
+
+---
+
 ## v0.9.1 — 2026-09-18 (one funnel for document onboarding)
 
 Every file now enters Cove Studio through a single boundary,

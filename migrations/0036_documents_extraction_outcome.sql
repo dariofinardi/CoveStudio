@@ -1,0 +1,25 @@
+-- Honest outcome of document onboarding.
+--
+-- Until now `documents.status` was written as 'ready' by every upload,
+-- whatever happened during extraction. A password-protected PDF, an
+-- image-only DOCX, a file whose extension lied: the row said ready, the
+-- prompt received an empty block, and the assistant answered with
+-- confidence about a document nobody had been able to read. The only
+-- trace was a line in the server log.
+--
+-- Status vocabulary for uploaded documents (corpus imports keep their
+-- own values: 'syncing', 'interrupted', and error strings):
+--
+--   ready    text was extracted and is usable
+--   no_text  the file was read but carries no text a model can use
+--            (a scan with no text layer, an image-only document, an
+--            empty file). `extraction_reason` says which.
+--   failed   the file could not be read at all. `extraction_reason`
+--            carries the sentence shown to the user.
+--
+-- Rows written before this migration keep 'ready'; they are not
+-- retro-classified, because we cannot know what extraction produced
+-- back then without re-reading every file. They are re-classified the
+-- next time the document is processed.
+
+ALTER TABLE documents ADD COLUMN extraction_reason TEXT;

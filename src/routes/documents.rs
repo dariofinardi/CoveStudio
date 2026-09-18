@@ -521,6 +521,12 @@ async fn upload_document(
     // chat send handler doesn't re-parse a 200-page PDF on every
     // turn. Skip extraction silently if the binary or text already
     // exist on disk — same hash means identical bytes.
+    // Filled by the extraction below. The default covers the
+    // non-cache branch, where text is read lazily and the verdict is
+    // recorded the first time the document is actually parsed.
+    let mut extraction_status = "ready".to_string();
+    let mut extraction_reason: Option<String> = None;
+
     let (storage_key, content_hash, extracted_text_path) = if cache {
         let hash = {
             let mut hasher = Sha256::new();
@@ -529,7 +535,13 @@ async fn upload_document(
         };
         let bin_ext = if ext.is_empty() { "bin".to_string() } else { ext.clone() };
         let bin_key = format!("cache/{}.{}", hash, bin_ext);
-        let txt_key = format!("cache/{}.txt", hash);
+        // `.extracted.txt`, not `.txt`: for a .txt or .md upload the
+        // binary key would otherwise be the *same path* as the
+        // extracted-text key, so writing the binary made the text look
+        // already-extracted and the extraction step was skipped
+        // silently. Old caches under `<hash>.txt` stay readable —
+        // documents store their own `extracted_text_path`.
+        let txt_key = format!("cache/{}.extracted.txt", hash);
 
         let root = storage_root();
         let bin_abs = root.join(bin_key.replace('/', std::path::MAIN_SEPARATOR_STR));
@@ -546,46 +558,71 @@ async fn upload_document(
         }
 
         if !txt_abs.exists() {
-            // extract_text_dispatch keys off the path's extension, so
-            // the absolute path of the binary we just wrote is the
-            // right thing to feed it (pdfium also needs an on-disk
-            // path for PDFs).
-            match crate::sync::scanner::extract_text_dispatch(&bin_abs, &data) {
-                Ok((text, skip_reason)) => {
-                    if let Some(reason) = skip_reason {
+            // The funnel keys off the path, so the absolute path of the
+            // binary we just wrote is what it needs (pdfium also wants
+            // an on-disk path for PDFs).
+            let bin_for_ingest = bin_abs.clone();
+            match tokio::task::spawn_blocking(move || {
+                crate::ingest::ingest_blocking(&bin_for_ingest)
+            })
+            .await
+            .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("ingest join: {e:?}")))?
+            {
+                Ok(doc) => {
+                    if let Some(reason) = doc.outcome.reason() {
                         tracing::info!(
-                            "[upload] cache text extraction skipped for {} ({}): {}",
-                            fname,
-                            hash,
-                            reason
+                            "[upload] {fname} ({hash}) carries no usable text: {reason}"
                         );
                     }
+                    extraction_status = doc.outcome.tag().to_string();
+                    extraction_reason = doc.outcome.reason().map(str::to_string);
                     storage
-                        .put(&txt_key, text.as_bytes(), "text/plain; charset=utf-8")
+                        .put(&txt_key, doc.text.as_bytes(), "text/plain; charset=utf-8")
                         .await
                         .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &e.to_string()))?;
                     tracing::info!(
-                        "[upload] cache text written: {} ({} chars)",
+                        "[upload] cache text written: {} ({} chars, {} sections)",
                         txt_key,
-                        text.len()
+                        doc.text.len(),
+                        doc.sections.len(),
                     );
                 }
                 Err(e) => {
-                    tracing::warn!(
-                        "[upload] cache text extraction failed for {} ({}): {}",
-                        fname,
-                        hash,
-                        e
-                    );
-                    // Drop a marker so we don't retry on every reload —
-                    // an empty .txt is a valid "we tried" signal.
+                    // Not a silent empty string any more: the row says
+                    // `failed` and carries the sentence the interface
+                    // shows and the prompt states.
+                    let reason = e
+                        .downcast_ref::<crate::ingest::IngestError>()
+                        .map(|ie| ie.reason.clone())
+                        .unwrap_or_else(|| format!("{e:#}"));
+                    tracing::warn!("[upload] {fname} ({hash}) could not be read: {reason}");
+                    extraction_status = "failed".to_string();
+                    extraction_reason = Some(reason);
+                    // Keep the empty marker so a reload does not retry
+                    // a file we already know we cannot read.
                     let _ = storage
                         .put(&txt_key, b"", "text/plain; charset=utf-8")
                         .await;
                 }
             }
         } else {
-            tracing::info!("[upload] cache text already exists, reusing: {}", txt_key);
+            // A re-upload of content we have already extracted. The
+            // verdict has to come from that text, not from an
+            // assumption: a cached empty extraction means the file was
+            // unreadable then and still is now.
+            let cached = storage.get(&txt_key).await.unwrap_or_default();
+            let cached = String::from_utf8_lossy(&cached);
+            if cached.trim().is_empty() {
+                extraction_status = "no_text".to_string();
+                extraction_reason =
+                    Some("il file non contiene testo estraibile".to_string());
+            }
+            tracing::info!(
+                "[upload] cache text already exists, reusing: {} ({} chars, status={})",
+                txt_key,
+                cached.len(),
+                extraction_status,
+            );
         }
 
         (bin_key, Some(hash), Some(txt_key))
@@ -633,8 +670,8 @@ async fn upload_document(
     };
 
     sqlx::query(
-        "INSERT INTO documents (id, user_id, project_id, filename, file_type, size_bytes, storage_path, status, content_hash, extracted_text_path, domain) \
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'ready', ?, ?, COALESCE(?, 'legal'))",
+        "INSERT INTO documents (id, user_id, project_id, filename, file_type, size_bytes, storage_path, status, extraction_reason, content_hash, extracted_text_path, domain) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'legal'))",
     )
     .bind(&doc_id)
     .bind(&auth.user_id)
@@ -643,6 +680,8 @@ async fn upload_document(
     .bind(file_type)
     .bind(size)
     .bind(&storage_key)
+    .bind(&extraction_status)
+    .bind(&extraction_reason)
     .bind(&content_hash)
     .bind(&extracted_text_path)
     .bind(&resolved_domain)
@@ -656,7 +695,8 @@ async fn upload_document(
         "file_type": file_type,
         "size_bytes": size,
         "domain": resolved_domain.unwrap_or_else(|| "legal".to_string()),
-        "status": "ready"
+        "status": extraction_status,
+        "extraction_reason": extraction_reason,
     })))
 }
 

@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "cove-studio"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2024"
 description = "Cove Studio — private, local AI assistant for professional document work"
 
