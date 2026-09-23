@@ -22,6 +22,10 @@
 //! No prompt makes that impossible, so the prompt asks and the code
 //! enforces.
 
+pub mod form;
+pub mod report;
+pub mod sheet;
+
 use serde::{Deserialize, Serialize};
 
 /// One question as extracted from a single organisation's form.

@@ -1386,6 +1386,7 @@ dependencies = [
  "calamine 0.26.1",
  "chk_defaced",
  "chrono",
+ "docx-roundtrip",
  "dotenvy",
  "fastembed",
  "flate2",

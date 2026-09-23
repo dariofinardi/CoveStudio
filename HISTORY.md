@@ -16,6 +16,67 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.10.1 — 2026-09-24 (a Word document can be opened, and a form can be handed out)
+
+Two halves of the same job. Cove Studio could write a `.docx` and never
+read one back; and the intake pipeline could merge several organisations'
+forms into one schema with nowhere to put it.
+
+### Added — `crates/docx-roundtrip`
+
+A crate of its own, publishable separately: open a `.docx`, change it,
+write it back **without losing what it does not understand**. A company
+template carries text boxes, charts, fields and drawings no editor
+models; this keeps each of them as the XML it was and puts it back where
+it was, so a rich template survives an editor that understands half of
+it.
+
+Reimplemented in Rust from `QuoteDOCX` (a KeelOps plugin by the same
+author), whose design it follows — the opaque strategy above all. One
+difference: the original generates with a library and then re-opens the
+package to swap a marker for each kept fragment, rewriting relationship
+ids; writing the OOXML directly means the fragment goes straight to its
+place, with no marker that could survive into a delivered document.
+
+What the tests defend, because each was a way to lose a document: OOXML
+toggles are tri-state (absent means *inherit*, not *off*); Word's
+significant spaces survive; a `{{placeholder}}` split across runs — which
+is what Word writes after any edit near the braces — is still found; an
+unfilled placeholder is still a placeholder after a save; a tracked
+deletion is not quietly accepted; two writes of the same document produce
+the same bytes.
+
+### Added — the collection form, as three artefacts
+
+* **HTML**, self-contained, for the client to fill in: sticky section
+  index with per-section progress, conditional details that appear on a
+  "yes", amounts as text rather than number inputs (a number input
+  refuses `1.200,50` or reinterprets it), a draft kept in the browser and
+  nowhere else, and a banner saying in plain words that filling the form
+  sends nothing — they generate a summary, copy it, and paste it into
+  their reply. No native browser dialogs anywhere: in a sandboxed frame
+  they are silently blocked, so clearing the form asks for a second click
+  instead.
+* **XLSX** both ways: the sheet handed out is the sheet read back, keyed
+  on the field id, so a client who reorders rows or adds a column of
+  their own notes still sends something readable.
+* **DOCX** per recipient: each organisation's own questions in its own
+  order with the answers filled in, plus a gaps document for the broker —
+  what is missing and who requires it, and answers that say nothing
+  (`test`, `da definire`) flagged rather than corrected. A questionnaire
+  is a declaration, and the signature is the client's.
+
+### Notes
+
+* Verified: 725 tests in the workspace. The three generators are checked
+  by **reading their output back** — the DOCX through the new crate, the
+  XLSX through calamine — not by asserting on the bytes we just wrote.
+* No model is called anywhere in the suite; the live pipeline test stays
+  ignored by default.
+* Plan and open risks: `docs/piano-editor-docx.md`.
+
+---
+
 ## v0.10.0 — 2026-09-23 (asking a model for data, and checking what comes back)
 
 Cove Studio could only ask models for prose. Everything it needed as
