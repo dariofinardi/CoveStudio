@@ -1,5 +1,5 @@
 [workspace]
-members = [".", "src-tauri"]
+members = [".", "src-tauri", "crates/docx-roundtrip"]
 resolver = "2"
 
 [package]

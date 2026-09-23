@@ -1370,7 +1370,7 @@ dependencies = [
 
 [[package]]
 name = "cove-studio"
-version = "0.9.3"
+version = "0.10.0"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1434,7 +1434,7 @@ dependencies = [
 
 [[package]]
 name = "cove-studio-desktop"
-version = "0.9.3"
+version = "0.10.0"
 dependencies = [
  "anyhow",
  "cove-studio",
@@ -1970,6 +1970,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4b8a88685455ed29a21542a33abd9cb6510b6b129abadabdcef0f4c55bc8f61"
 dependencies = [
  "litrs",
+]
+
+[[package]]
+name = "docx-roundtrip"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "quick-xml 0.37.5",
+ "serde",
+ "serde_json",
+ "zip 2.4.2",
 ]
 
 [[package]]

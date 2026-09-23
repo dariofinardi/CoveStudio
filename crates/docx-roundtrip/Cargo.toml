@@ -1,0 +1,25 @@
+[package]
+name = "docx-roundtrip"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Open a .docx into an editable model, change it, write it back — without losing what the model does not understand."
+repository = "https://github.com/dariofinardi/CoveStudio"
+authors = ["Dario Finardi"]
+keywords = ["docx", "ooxml", "word", "document", "editor"]
+categories = ["parser-implementations", "text-processing"]
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Same versions as the host workspace: two copies of a zip or XML
+# reader in one binary is weight for nothing.
+quick-xml = "0.37"
+zip = "2"
+
+[dev-dependencies]
+serde_json = "1"
+# The walker tests build a package in memory rather than shipping a
+# .docx fixture for every case.
+zip = "2"
