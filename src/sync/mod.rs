@@ -20,7 +20,10 @@ pub use scanner::{ScanProgress, ScanReport, ScanStatus, scan_folder};
 /// pictures and field codes are dropped, paragraph breaks survive,
 /// which is exactly what the chunker needs.
 pub const SUPPORTED_EXTENSIONS: &[&str] = &[
-    "pdf", "docx", "rtf", "xlsx", "xls", "xlsb", "ods", "csv", "txt", "md",
+    "pdf", "docx", "rtf", "xlsx", "xls", "xlsb", "xlsm", "ods", "csv", "txt", "md",
+    // Legacy Office, readable since the onboarding funnel: a synced
+    // folder of old practice files is exactly where these live.
+    "doc", "ppt", "pps", "pot",
 ];
 
 /// Returns true if the given filename's extension is in the

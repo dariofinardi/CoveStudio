@@ -501,6 +501,13 @@ async fn upload_document(
         "xls" => "xls",
         "xlsb" => "xlsb",
         "ods" => "ods",
+        // Readable since the onboarding funnel arrived: the legacy
+        // Office family converts to Markdown before parsing. `.doc`
+        // was already offered in the composer while nothing could read
+        // it, which is the worst of both.
+        "doc" => "doc",
+        "ppt" | "pps" | "pot" => "ppt",
+        "xlsm" => "xlsm",
         "csv" => "csv",
         "txt" => "txt",
         "md" => "md",
@@ -569,13 +576,13 @@ async fn upload_document(
             .map_err(|e| err(StatusCode::INTERNAL_SERVER_ERROR, &format!("ingest join: {e:?}")))?
             {
                 Ok(doc) => {
-                    if let Some(reason) = doc.outcome.reason() {
+                    if let Some(code) = doc.outcome.code() {
                         tracing::info!(
-                            "[upload] {fname} ({hash}) carries no usable text: {reason}"
+                            "[upload] {fname} ({hash}) carries no usable text: {code}"
                         );
                     }
                     extraction_status = doc.outcome.tag().to_string();
-                    extraction_reason = doc.outcome.reason().map(str::to_string);
+                    extraction_reason = doc.outcome.code().map(str::to_string);
                     storage
                         .put(&txt_key, doc.text.as_bytes(), "text/plain; charset=utf-8")
                         .await
@@ -593,8 +600,8 @@ async fn upload_document(
                     // shows and the prompt states.
                     let reason = e
                         .downcast_ref::<crate::ingest::IngestError>()
-                        .map(|ie| ie.reason.clone())
-                        .unwrap_or_else(|| format!("{e:#}"));
+                        .map(|ie| ie.stored_reason())
+                        .unwrap_or_else(|| format!("read_failed: {e:#}"));
                     tracing::warn!("[upload] {fname} ({hash}) could not be read: {reason}");
                     extraction_status = "failed".to_string();
                     extraction_reason = Some(reason);
@@ -615,7 +622,7 @@ async fn upload_document(
             if cached.trim().is_empty() {
                 extraction_status = "no_text".to_string();
                 extraction_reason =
-                    Some("il file non contiene testo estraibile".to_string());
+                    Some(crate::ingest::outcome::no_text::EMPTY_FILE.to_string());
             }
             tracing::info!(
                 "[upload] cache text already exists, reusing: {} ({} chars, status={})",

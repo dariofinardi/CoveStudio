@@ -73,6 +73,10 @@ pub struct IngestedDoc {
     pub format: String,
     /// Whether the text is usable, and why not when it is not.
     pub outcome: ExtractionOutcome,
+    /// Something the reader should know about text that *was*
+    /// extracted; see `outcome::warning`. Today: a text layer that
+    /// disagrees with what is printed.
+    pub warning: Option<&'static str>,
 }
 
 impl IngestedDoc {
@@ -80,6 +84,121 @@ impl IngestedDoc {
     pub fn has_text(&self) -> bool {
         matches!(self.outcome, ExtractionOutcome::Ready) && !self.text.trim().is_empty()
     }
+}
+
+/// Titles the library supplies itself. None of them is something the
+/// document says, so none may count as content or be rendered as a
+/// heading.
+///
+/// The second one is the important one: a PDF with no text layer comes
+/// back as a single section titled "PDF (nessun testo estraibile)" with
+/// an empty body. Counting that as a heading declared a scan
+/// **readable** and handed the model that sentence as though it were
+/// the document's content — the exact defect this funnel exists to
+/// remove, in a new hiding place.
+const SYNTHETIC_TITLES: &[&str] = &["Introduzione", "PDF (nessun testo estraibile)"];
+
+/// Title the library gives to the text before the first heading.
+const SYNTHETIC_INTRO_TITLE: &str = "Introduzione";
+
+/// Formats Cove Studio reads as plain text and the library does not
+/// know at all. `.csv` is the case that matters: the library's format
+/// detector has no entry for it, so it would come back "unsupported",
+/// while here a CSV is a first-class document — the tabular workflows
+/// parse the rows themselves, and the assistant reads them as text.
+///
+/// TODO (upstream, `pageindex-rs`): add `"csv" => InputFormat::Text`
+/// to `detect_format` in `pageindex-rs/src/parser/mod.rs` — a CSV is
+/// plain text for parsing purposes, and every consumer of that library
+/// gains it. Once that lands and the pinned revision moves, this
+/// constant and `plain_text_doc` below can go, and the branch at the
+/// top of `ingest_blocking` with them.
+const PLAIN_TEXT_ONLY: &[&str] = &["csv"];
+
+/// Runs the tamper check on a document that produced text.
+///
+/// The library runs the same check internally but only logs it: the
+/// result never reaches `ParseResult`, so a caller cannot act on it.
+/// Until it does (reported upstream), we ask `chk_defaced` ourselves —
+/// the same crate, already in the dependency graph. The second pass
+/// costs a read of the file; for the one case it catches, that is a
+/// trade worth making.
+fn defaced_warning(path: &Path) -> Option<&'static str> {
+    use chk_defaced::finding::Severity;
+    let report = match chk_defaced::scan::scan_path(path, None) {
+        Ok(r) => r,
+        // Not every format is supported, and a checker failure must
+        // never cost us a document we could otherwise read.
+        Err(e) => {
+            tracing::debug!("[ingest] tamper check skipped for {}: {e}", path.display());
+            return None;
+        }
+    };
+    let serious = report
+        .findings
+        .iter()
+        .filter(|f| f.severity >= Severity::High)
+        .count();
+    if serious == 0 {
+        return None;
+    }
+    tracing::warn!(
+        "[ingest] {}: {serious} serious finding(s) — the extracted text may differ from          what is printed",
+        path.display()
+    );
+    Some(outcome::warning::TEXT_LAYER_UNRELIABLE)
+}
+
+/// Whether a section title is something the document carries, as
+/// opposed to a placeholder the parser supplied: the synthetic
+/// "Introduzione", or the file's own name (which is what an empty file
+/// comes back with).
+fn is_real_heading(title: &str, path: &Path) -> bool {
+    let title = title.trim();
+    if title.is_empty() || SYNTHETIC_TITLES.contains(&title) {
+        return false;
+    }
+    // Only the name *with its extension* counts as the parser's echo.
+    // Comparing the stem too would reject the most ordinary case there
+    // is — `scadenze.md` whose first heading is "Scadenze" — and
+    // declare a perfectly readable note unreadable.
+    let echoes_file_name = path
+        .file_name()
+        .and_then(|p| p.to_str())
+        .map(|p| p.eq_ignore_ascii_case(title))
+        .unwrap_or(false);
+    !echoes_file_name
+}
+
+/// Reads a file as plain UTF-8 text, as one section with no heading.
+/// Invalid bytes become U+FFFD rather than an error: a spreadsheet
+/// exported in a legacy code page is still worth reading.
+fn plain_text_doc(path: &Path, format: &str) -> Result<IngestedDoc> {
+    let bytes = std::fs::read(path)
+        .map_err(|e| anyhow!(IngestError::from_parser_error(&anyhow!("{e}"))).context(e))?;
+    let text = String::from_utf8_lossy(&bytes).trim().to_string();
+    let outcome = if text.is_empty() {
+        ExtractionOutcome::NoText {
+            code: outcome::no_text::EMPTY_FILE,
+        }
+    } else {
+        ExtractionOutcome::Ready
+    };
+    Ok(IngestedDoc {
+        sections: vec![Section {
+            level: 1,
+            title: String::new(),
+            text: text.clone(),
+            page: None,
+        }],
+        text,
+        title: None,
+        page_count: None,
+        format: format.to_string(),
+        outcome,
+        // Plain text has no font tables to tamper with.
+        warning: None,
+    })
 }
 
 /// Marker the rest of the codebase matches on to attribute a page to a
@@ -116,7 +235,30 @@ pub fn render_text(sections: &[Section]) -> String {
         let title_is_page_echo = current_page
             .map(|p| title == format!("Pagina {p}"))
             .unwrap_or(false);
-        if !title.is_empty() && !title_is_page_echo {
+        // For a plain-text file the parser takes the first line as the
+        // section title and keeps it in the body. Printing both would
+        // duplicate that line, and a model reading a duplicated opening
+        // line has to wonder whether the document really says it twice.
+        // "Introduzione" is the parser's placeholder for text that
+        // precedes the first heading — a structural artefact, not
+        // something the document says. It stays in `sections`, where
+        // the structure must be faithful, but printing it would put a
+        // heading the author never wrote in front of a CSV or a plain
+        // note.
+        let title_is_synthetic_intro = SYNTHETIC_TITLES.contains(&title);
+        let title_opens_the_body = !title.is_empty()
+            && section
+                .text
+                .trim_start()
+                .lines()
+                .next()
+                .map(|first| first.trim() == title)
+                .unwrap_or(false);
+        if !title.is_empty()
+            && !title_is_page_echo
+            && !title_opens_the_body
+            && !title_is_synthetic_intro
+        {
             if !out.is_empty() && !out.ends_with('\n') {
                 out.push_str("\n\n");
             }
@@ -146,10 +288,70 @@ pub async fn ingest_path(path: &Path) -> Result<IngestedDoc> {
         .map_err(|e| anyhow!("ingest task join: {e:?}"))?
 }
 
+/// Onboards content that is not (or may not be) on disk under the name
+/// that matters: the storage layer keys blobs by hash, and the
+/// rejection-summary path has only bytes plus a file type.
+///
+/// The extension drives format detection, so the bytes are written to
+/// a temporary file that *carries* it. `filename_hint` may be a bare
+/// name (`blob.docx`) or a full path; only its extension is used.
+pub fn ingest_bytes(filename_hint: &str, bytes: &[u8]) -> Result<IngestedDoc> {
+    let ext = Path::new(filename_hint)
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("bin")
+        .to_ascii_lowercase();
+    let dir = std::env::temp_dir().join(crate::product::SLUG).join("ingest");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| anyhow!("creating the ingest scratch dir {}: {e}", dir.display()))?;
+    // The name has to be unique: two turns can onboard two different
+    // documents of the same type at the same moment.
+    let path = dir.join(format!("{}.{ext}", uuid::Uuid::new_v4()));
+    std::fs::write(&path, bytes)
+        .map_err(|e| anyhow!("writing the ingest scratch file {}: {e}", path.display()))?;
+    let result = ingest_blocking(&path);
+    // Best effort: a leftover in the OS temp directory is noise, not a
+    // failure worth surfacing over the document itself.
+    let _ = std::fs::remove_file(&path);
+    result
+}
+
+/// Onboards a file that may or may not be readable at `path`, with the
+/// bytes as the fallback.
+///
+/// Several callers hold both: the folder scanner has already read the
+/// file to hash it, the tabular reader has a real path *and* the bytes,
+/// and the summariser has only bytes plus a synthetic name. Preferring
+/// the path matters for PDFs — pdfium wants an on-disk file — while the
+/// bytes keep the blob-only callers working.
+pub fn ingest_path_or_bytes(path: &Path, bytes: &[u8]) -> Result<IngestedDoc> {
+    if path.is_file() {
+        return ingest_blocking(path);
+    }
+    ingest_bytes(&path.to_string_lossy(), bytes)
+}
+
 /// Synchronous form, for callers already on a blocking thread (the
 /// folder scanner walks thousands of files on one).
 pub fn ingest_blocking(path: &Path) -> Result<IngestedDoc> {
     let started_at = std::time::Instant::now();
+    let ext = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if PLAIN_TEXT_ONLY.contains(&ext.as_str()) {
+        let doc = plain_text_doc(path, &ext)?;
+        tracing::info!(
+            "[ingest] {} → format={} chars={} outcome={} in {:?} (plain text)",
+            path.display(),
+            doc.format,
+            doc.text.len(),
+            doc.outcome.tag(),
+            started_at.elapsed(),
+        );
+        return Ok(doc);
+    }
     match pageindex_rs::parser::parse_file(path) {
         Ok((format, parsed)) => {
             let sections: Vec<Section> = parsed
@@ -163,22 +365,35 @@ pub fn ingest_blocking(path: &Path) -> Result<IngestedDoc> {
                 })
                 .collect();
             let text = render_text(&sections);
-            // The verdict is about the *body*, not the rendered string:
-            // the parser gives an empty file a synthetic heading
-            // ("Introduzione"), which would otherwise count as content
-            // and put us back to answering questions about a document
-            // that says nothing.
+            // What counts as content: any section body, or any heading
+            // the document really carries. Both ends of that matter.
+            // A note whose whole content is a heading ("# Scadenze")
+            // does say something. But the parser also invents headings:
+            // "Introduzione" for text before the first one, and — for a
+            // file with nothing in it — the *file's own name*. Neither
+            // is content, and counting them would bring back the defect
+            // this whole funnel exists to remove: a document reported as
+            // readable with nothing to read.
             let has_body = if sections.is_empty() {
                 !text.trim().is_empty()
             } else {
-                sections.iter().any(|s| !s.text.trim().is_empty())
+                sections
+                    .iter()
+                    .any(|s| !s.text.trim().is_empty() || is_real_heading(&s.title, path))
             };
             let outcome = if !has_body {
                 ExtractionOutcome::NoText {
-                    reason: outcome::no_text_reason(&format),
+                    code: outcome::no_text_code(&format),
                 }
             } else {
                 ExtractionOutcome::Ready
+            };
+            // Only worth asking when there is text to distrust, and
+            // only for the formats the checker understands.
+            let warning = if matches!(outcome, ExtractionOutcome::Ready) {
+                defaced_warning(path)
+            } else {
+                None
             };
             let doc = IngestedDoc {
                 text,
@@ -187,6 +402,7 @@ pub fn ingest_blocking(path: &Path) -> Result<IngestedDoc> {
                 page_count: parsed.page_count,
                 format: format_tag(&format, path),
                 outcome,
+                warning,
             };
             tracing::info!(
                 "[ingest] {} → format={} sections={} pages={:?} chars={} outcome={} in {:?}",
@@ -209,7 +425,7 @@ pub fn ingest_blocking(path: &Path) -> Result<IngestedDoc> {
                 "[ingest] {} failed after {:?}: {}",
                 path.display(),
                 started_at.elapsed(),
-                err.reason
+                err
             );
             Err(anyhow!(err))
         }
@@ -302,6 +518,55 @@ mod tests {
     }
 
     #[test]
+    fn a_title_the_body_already_opens_with_is_not_repeated() {
+        // Plain text: the parser makes the first line the title and
+        // leaves it in the body.
+        let out = render_text(&[section(1, "hello", "hello
+world", None)]);
+        assert_eq!(out, "hello
+world");
+    }
+
+    #[test]
+    fn a_title_the_body_does_not_repeat_is_kept() {
+        let out = render_text(&[section(1, "Titolo", "corpo", None)]);
+        assert_eq!(out, "Titolo
+corpo");
+    }
+
+    #[test]
+    fn a_real_heading_is_content_but_a_placeholder_is_not() {
+        let p = Path::new("C:/docs/scadenze.md");
+        // A note whose whole content is "# Scadenze" says something.
+        assert!(is_real_heading("Scadenze", p));
+        // The parser's placeholders: the intro heading, and the one a
+        // PDF with no text layer comes back with.
+        assert!(!is_real_heading(SYNTHETIC_INTRO_TITLE, p));
+        assert!(!is_real_heading("PDF (nessun testo estraibile)", p));
+        // What an empty file comes back with: its own name, extension
+        // included, whatever the case.
+        assert!(!is_real_heading("scadenze.md", p));
+        assert!(!is_real_heading("SCADENZE.MD", p));
+        assert!(!is_real_heading("   ", p));
+        // The stem alone is NOT a placeholder: a note named
+        // `scadenze.md` opening with "# Scadenze" is the ordinary case,
+        // and calling it unreadable would be a worse bug than the one
+        // this rule fixes.
+        assert!(is_real_heading("scadenze", p));
+    }
+
+    #[test]
+    fn the_synthetic_intro_heading_is_not_rendered() {
+        // A CSV or a plain note has no headings; the parser wraps the
+        // whole content under "Introduzione". That word must not reach
+        // the model as if the author had written it.
+        let out = render_text(&[section(1, "Introduzione", "riga1
+riga2", None)]);
+        assert_eq!(out, "riga1
+riga2");
+    }
+
+    #[test]
     fn page_echo_titles_are_not_repeated() {
         // The PDF fallback names its sections "Pagina N"; with the
         // marker on the line above it would read twice.
@@ -325,11 +590,12 @@ mod tests {
     fn a_heading_without_any_body_is_not_text() {
         // Mirrors `ingest_blocking`'s rule; asserted here on the same
         // predicate the caller uses.
-        let sections = vec![section(1, "Introduzione", "", None)];
+        let sections = vec![section(1, "Allegati", "", None)];
         let has_body = sections.iter().any(|s| !s.text.trim().is_empty());
         assert!(!has_body, "a lone heading must not count as content");
-        // …while the heading itself is still rendered, for the reader.
-        assert_eq!(render_text(&sections), "Introduzione");
+        // …while a heading the document really carries is still
+        // rendered, for the reader.
+        assert_eq!(render_text(&sections), "Allegati");
     }
 
     #[test]
@@ -352,6 +618,7 @@ mod tests {
             page_count: None,
             format: "txt".into(),
             outcome: ExtractionOutcome::Ready,
+            warning: None,
         };
         assert!(ready.has_text());
 
@@ -363,7 +630,7 @@ mod tests {
 
         let no_text = IngestedDoc {
             outcome: ExtractionOutcome::NoText {
-                reason: "scansione".into(),
+                code: outcome::no_text::SCANNED_PDF,
             },
             ..ready.clone()
         };

@@ -1371,5 +1371,22 @@
     "modeReflow": "Reflujo",
     "switchToReflow": "Cambiar al modo reflujo — abandona la geometría de página y rellena el ancho del panel con texto refluido",
     "switchToFit": "Cambiar a Ajustar A4 — preserva la geometría de la página y la escala al ancho del panel"
+  },
+  "Ingest": {
+    "badge": "ilegible",
+    "toastTitle": "No se ha podido leer el documento",
+    "reason": {
+      "scanned_pdf": "el PDF no contiene texto seleccionable: es un escaneo o una imagen",
+      "image_only": "el documento no contiene texto, probablemente solo imágenes",
+      "empty_file": "el archivo está vacío",
+      "office_no_text": "no se ha podido extraer texto del archivo",
+      "image_needs_vision_model": "es una imagen y el modelo elegido no lee imágenes: elige uno multimodal en los ajustes",
+      "encrypted_pdf": "el PDF está protegido con contraseña: quita la protección y vuelve a subirlo",
+      "unsupported_format": "formato no admitido",
+      "corrupt_file": "el archivo está dañado, o no es del formato que declara su extensión",
+      "read_failed": "la lectura ha fallado",
+      "text_layer_unreliable": "el texto extraído puede no coincidir con lo impreso: comprueba el documento original",
+      "unknown": "el documento no se ha leído"
+    }
   }
 }

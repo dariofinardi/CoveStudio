@@ -382,84 +382,35 @@ async fn upsert_synced_file(
     Ok(())
 }
 
-/// Extract plain text from a file. Returns `(text, Some(reason))` when
-/// the file is intentionally skipped (scanned PDF, etc.) — `text` is
-/// empty in that case. Returns `(text, None)` on success.
+/// Extract plain text from a file, in the shape the scanner and the
+/// other batch callers want: `(text, Some(reason))` when the file was
+/// read but carries nothing usable — `text` is empty then — and
+/// `(text, None)` when it did.
 ///
-/// Public so the document-upload handler (`/single-documents` with
-/// `cache=true`) can extract on the same code path the folder scanner
-/// uses, instead of duplicating the per-format dispatch.
+/// A thin adapter over `crate::ingest`, which is the one place that
+/// knows how each format is parsed. Before, this function *was* the
+/// dispatcher, and two more copies of the same idea lived in the chat
+/// loader and in the LLM tools, each failing differently.
 pub fn extract_text_dispatch(path: &Path, bytes: &[u8]) -> Result<(String, Option<String>)> {
-    let ext = path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-
-    match ext.as_str() {
-        "txt" | "md" | "csv" => {
-            let s = String::from_utf8_lossy(bytes).into_owned();
-            Ok((s, None))
-        }
-        "docx" => {
-            let s = crate::pdf::extract_docx_text(bytes)?;
-            Ok((s, None))
-        }
-        "rtf" => {
-            // rtf-parser gives us plain text after stripping control
-            // words, font tables, color tables, picture data and field
-            // instructions. We only feed the LLM/embedder the body, so
-            // that's exactly what we want.
-            //
-            // RTF is ASCII-with-escapes by spec but real files routinely
-            // smuggle UTF-8 inside braces — lossy decode upfront keeps
-            // the parser happy on those edge cases.
-            let raw = String::from_utf8_lossy(bytes);
-            let s = match rtf_parser::RtfDocument::try_from(raw.as_ref()) {
-                Ok(doc) => doc.get_text(),
-                Err(e) => {
-                    return Ok((
-                        String::new(),
-                        Some(format!("malformed RTF: {e}")),
-                    ));
-                }
-            };
-            Ok((s, None))
-        }
-        "xlsx" | "xls" | "xlsb" | "ods" => {
-            let s = crate::pdf::extract_xlsx_text(bytes)?;
-            Ok((s, None))
-        }
-        #[cfg(feature = "pdf")]
-        "pdf" => {
-            let pages = crate::pdf::extract_text(path)?;
-            if crate::pdf::is_scanned_pdf(&pages) {
-                return Ok((
-                    String::new(),
-                    Some("scanned PDF (no embedded text)".to_string()),
-                ));
+    match crate::ingest::ingest_path_or_bytes(path, bytes) {
+        Ok(doc) => match doc.outcome {
+            crate::ingest::ExtractionOutcome::Ready => Ok((doc.text, None)),
+            crate::ingest::ExtractionOutcome::NoText { code } => {
+                Ok((String::new(), Some(code.to_string())))
             }
-            // Concatenate pages with markers so retrieval can keep
-            // some locality info when chunks straddle pages.
-            let mut out = String::new();
-            for (i, p) in pages.iter().enumerate() {
-                if !out.is_empty() {
-                    out.push_str("\n\n");
-                }
-                out.push_str(&format!("[Page {}]\n", i + 1));
-                out.push_str(&p.text);
-            }
-            Ok((out, None))
+        },
+        // A file this batch cannot read is *skipped with a reason*, not
+        // an error: one unreadable file in a scanned folder must not
+        // look like the scan itself broke, and that reason is what the
+        // data-sources panel shows next to the row. The scanner keeps
+        // `failed` for what it means — an I/O error while walking.
+        Err(e) => {
+            let reason = e
+                .downcast_ref::<crate::ingest::IngestError>()
+                .map(|ie| ie.stored_reason())
+                .unwrap_or_else(|| format!("read_failed: {e:#}"));
+            Ok((String::new(), Some(reason)))
         }
-        #[cfg(not(feature = "pdf"))]
-        "pdf" => Ok((
-            String::new(),
-            Some("PDF support not compiled in this build".to_string()),
-        )),
-        other => Ok((
-            String::new(),
-            Some(format!("format not supported: {other}")),
-        )),
     }
 }
 
@@ -499,31 +450,41 @@ mod tests {
     }
 
     #[test]
-    fn malformed_rtf_skipped_with_reason() {
-        // Header looks like RTF but body is garbage that won't parse.
+    fn malformed_rtf_is_not_a_panic_and_carries_a_code() {
+        // Header looks like RTF, body is garbage. The funnel is more
+        // lenient than the old per-format extractor: the Office
+        // converter salvages what it can, so text may come back. What
+        // this test defends is the contract — no panic, and when
+        // nothing is usable, a code the interface can translate.
         let bad = b"{\\rtf1 \\bad{{nested";
         let (text, skip) = dispatch("broken.rtf", bad);
-        assert!(text.is_empty());
-        // Either parsed leniently to "" or returned a skip reason —
-        // both are acceptable outcomes; what matters is no panic.
-        if let Some(reason) = skip {
-            assert!(reason.contains("RTF") || reason.contains("malformed"));
+        if text.trim().is_empty() {
+            let code = skip.expect("nothing usable must come with a reason");
+            assert!(
+                !code.contains(char::is_whitespace) || code.starts_with("read_failed"),
+                "the reason must be a canonical code, not a sentence: {code}"
+            );
         }
     }
 
     #[test]
-    fn unknown_extension_returns_skip_reason() {
+    fn unknown_extension_returns_a_code() {
         let (text, skip) = dispatch("data.xyz", b"some content");
         assert!(text.is_empty());
-        assert!(skip.unwrap().contains("not supported"));
+        assert_eq!(skip.unwrap(), "unsupported_format");
     }
-
     #[test]
     fn txt_md_csv_pass_through_as_plain_text() {
         for ext in ["txt", "md", "csv"] {
             let (text, skip) = dispatch(&format!("file.{ext}"), b"hello\nworld");
             assert!(skip.is_none(), ".{ext} must not be skipped");
-            assert_eq!(text, "hello\nworld");
+            // Neither the synthetic "Introduzione" heading nor a
+            // duplicated first line may appear: the model has to read
+            // what the file says and nothing else.
+            assert!(text.contains("hello"), ".{ext}: {text:?}");
+            assert!(text.contains("world"), ".{ext}: {text:?}");
+            assert!(!text.contains("Introduzione"), ".{ext}: {text:?}");
+            assert_eq!(text.matches("hello").count(), 1, ".{ext}: {text:?}");
         }
     }
 }

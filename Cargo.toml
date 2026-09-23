@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "cove-studio"
-version = "0.9.2"
+version = "0.9.3"
 edition = "2024"
 description = "Cove Studio — private, local AI assistant for professional document work"
 
@@ -61,7 +61,7 @@ sha2 = "0.10"
 # one ONNX Runtime. Release candidates 10 to 12 were rejected upstream
 # because some models hung during session initialisation on ARM; rc.13
 # is the first since rc.9 that runs them, and it was validated on
-# win-arm64 in the pageindex-local-rs project before this move. The
+# win-arm64 in the pageindex-rs project before this move. The
 # same project measured rc.13 + ONNX 1.28.2 against rc.9 + 1.20.1:
 # retrieval quality equivalent, CPU latency better. See HISTORY.md.
 fastembed = { version = "=5.17.4", optional = true, default-features = false, features = [
@@ -157,7 +157,13 @@ gliner2-rs = { version = "=0.9.6", optional = true, default-features = false, fe
 # us, so cargo keeps a single copy of each and one ONNX Runtime in the
 # process.
 # ------------------------------------------------------------------
-pageindex-rs = { git = "https://github.com/dariofinardi/pageindex-local-rs", rev = "f884548d55deb37865bd6ca887068e9eb4662849", default-features = false }
+pageindex-rs = { git = "https://github.com/dariofinardi/pageindex-rs", rev = "f884548d55deb37865bd6ca887068e9eb4662849", default-features = false }
+# Tamper detection for PDF and DOCX: does the text layer agree with what
+# is printed? `pageindex-rs` runs the same check internally but only
+# logs it, so the verdict never reaches a caller — until it does, we ask
+# directly. Same crate, already in the graph through that dependency;
+# `default-features = false` keeps the CLI and the scraper out.
+chk_defaced = { version = "0.2", default-features = false }
 
 # ------------------------------------------------------------------
 # PDF extraction — pdfium-render (bundled dll in libs/pdfium/)

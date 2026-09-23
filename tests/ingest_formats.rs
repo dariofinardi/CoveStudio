@@ -128,8 +128,8 @@ async fn an_empty_file_is_reported_as_having_no_text() {
     assert!(!doc.has_text());
     assert_eq!(doc.outcome.tag(), "no_text");
     assert!(
-        doc.outcome.reason().is_some_and(|r| !r.is_empty()),
-        "a verdict without a reason is no better than silence"
+        doc.outcome.code().is_some_and(|c| !c.is_empty()),
+        "a verdict without a code is no better than silence"
     );
 }
 
@@ -144,7 +144,9 @@ async fn an_unsupported_format_fails_with_a_reason() {
         .downcast_ref::<ingest::IngestError>()
         .expect("the error must carry our own kind and reason");
     assert_eq!(ingest_err.kind, "unsupported_format");
-    assert!(!ingest_err.reason.is_empty());
+    // The stored form is what lands in `documents.extraction_reason`
+    // and what the interface translates.
+    assert_eq!(ingest_err.stored_reason(), "unsupported_format");
 }
 
 #[tokio::test]
@@ -160,11 +162,11 @@ async fn a_corrupt_docx_fails_with_a_reason_rather_than_empty_text() {
         .downcast_ref::<ingest::IngestError>()
         .expect("typed error");
     assert!(
-        matches!(ingest_err.kind, "corrupt" | "failed"),
+        matches!(ingest_err.kind, "corrupt_file" | "read_failed"),
         "unexpected kind: {}",
         ingest_err.kind
     );
-    assert!(!ingest_err.reason.is_empty());
+    assert!(!ingest_err.stored_reason().is_empty());
 }
 
 #[tokio::test]
@@ -278,6 +280,103 @@ async fn reads_an_rtf_file() {
     // Control words must not leak into what the model reads.
     assert!(!doc.text.contains("\rtf1"), "rtf markup leaked: {}", doc.text);
     assert!(!doc.text.contains("fonttbl"), "rtf markup leaked: {}", doc.text);
+}
+
+#[tokio::test]
+async fn reads_a_csv_as_plain_text() {
+    // The library's format detector has no entry for `.csv`, so
+    // without the boundary's plain-text path this would come back
+    // "unsupported" — and the tabular workflows, which parse the rows
+    // themselves, would lose their input.
+    let path = write_temp(
+        "prospetto.csv",
+        b"Voce;Importo
+Canone locazione;1200,50
+Spese condominiali;180,00
+",
+    );
+    let doc = ingest::ingest_path(&path).await.expect("csv must parse");
+
+    assert_eq!(doc.format, "csv");
+    assert!(doc.has_text());
+    assert!(doc.text.contains("Canone locazione"), "{}", doc.text);
+    assert!(doc.text.contains("1200,50"), "{}", doc.text);
+    // Row order and separators are the document; nothing may be
+    // injected in front of them.
+    assert!(doc.text.starts_with("Voce;Importo"), "{}", doc.text);
+    assert!(!doc.text.contains("Introduzione"), "{}", doc.text);
+}
+
+#[tokio::test]
+async fn an_empty_csv_is_reported_as_having_no_text() {
+    let path = write_temp("vuoto.csv", b"   
+");
+    let doc = ingest::ingest_path(&path).await.expect("parses");
+    assert!(!doc.has_text());
+    assert_eq!(doc.outcome.code(), Some("empty_file"));
+}
+
+#[tokio::test]
+async fn a_scanned_pdf_is_reported_as_a_scan_not_as_readable() {
+    // The defect this catches: the library returns a single section
+    // titled "PDF (nessun testo estraibile)" for a PDF with no text
+    // layer. Counted as a heading, that declared the scan **readable**
+    // and handed the model that sentence as if it were the document.
+    let doc = ingest::ingest_path(Path::new("tests/fixtures/scan_es.pdf"))
+        .await
+        .expect("a scan still parses");
+
+    assert_eq!(doc.format, "pdf");
+    assert!(!doc.has_text(), "a scan has no text: {:?}", doc.text);
+    assert_eq!(doc.outcome.code(), Some("scanned_pdf"));
+    assert!(
+        doc.text.trim().is_empty(),
+        "the placeholder must not reach the model: {:?}",
+        doc.text
+    );
+}
+
+#[tokio::test]
+async fn reads_legacy_word_and_powerpoint() {
+    // `.doc` and `.ppt` were unreadable before the onboarding funnel —
+    // `.doc` was even offered in the composer while nothing could open
+    // it. Real OLE files, not renamed zips.
+    let doc = ingest::ingest_path(Path::new("tests/fixtures/office.doc"))
+        .await
+        .expect("legacy .doc must parse");
+    assert_eq!(doc.format, "doc");
+    assert!(doc.has_text(), "no text from .doc");
+    assert!(
+        doc.text.contains("test document"),
+        "body missing: {}",
+        doc.text
+    );
+
+    let ppt = ingest::ingest_path(Path::new("tests/fixtures/office.ppt"))
+        .await
+        .expect("legacy .ppt must parse");
+    assert_eq!(ppt.format, "ppt");
+    assert!(ppt.has_text(), "no text from .ppt");
+    assert!(
+        ppt.text.contains("test title"),
+        "slide text missing: {}",
+        ppt.text
+    );
+    // Slides carry structure: each one is a section.
+    assert!(ppt.sections.len() >= 2, "{:?}", ppt.sections.len());
+}
+
+#[tokio::test]
+async fn a_healthy_document_is_not_flagged_as_tampered() {
+    // The tamper check must stay quiet on ordinary files, or the
+    // warning becomes noise nobody reads.
+    let doc = ingest::ingest_path(&sample_pdf()).await.expect("parse");
+    assert!(doc.warning.is_none(), "{:?}", doc.warning);
+
+    let txt = ingest::ingest_path(Path::new("tests/docs insurance/doc1.txt"))
+        .await
+        .expect("parse");
+    assert!(txt.warning.is_none());
 }
 
 #[tokio::test]

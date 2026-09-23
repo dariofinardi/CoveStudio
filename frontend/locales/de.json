@@ -1371,5 +1371,22 @@
     "modeReflow": "Umfließen",
     "switchToReflow": "In den Umfließen-Modus wechseln — verwirft die Seitengeometrie und füllt die Panelbreite mit umfließendem Text",
     "switchToFit": "Auf A4 anpassen umschalten — bewahrt die Seitengeometrie und skaliert sie auf die Panelbreite"
+  },
+  "Ingest": {
+    "badge": "nicht lesbar",
+    "toastTitle": "Dokument konnte nicht gelesen werden",
+    "reason": {
+      "scanned_pdf": "das PDF enthält keinen auswählbaren Text: es ist ein Scan oder ein Bild",
+      "image_only": "das Dokument enthält keinen Text, vermutlich nur Bilder",
+      "empty_file": "die Datei ist leer",
+      "office_no_text": "aus der Datei konnte kein Text gewonnen werden",
+      "image_needs_vision_model": "es ist ein Bild, und das gewählte Modell liest keine Bilder: wählen Sie in den Einstellungen ein multimodales Modell",
+      "encrypted_pdf": "das PDF ist passwortgeschützt: entfernen Sie den Schutz und laden Sie die Datei erneut hoch",
+      "unsupported_format": "nicht unterstütztes Format",
+      "corrupt_file": "die Datei ist beschädigt oder hat nicht das Format, das ihre Endung angibt",
+      "read_failed": "Lesen fehlgeschlagen",
+      "text_layer_unreliable": "der gewonnene Text kann vom Gedruckten abweichen: prüfen Sie das Originaldokument",
+      "unknown": "das Dokument wurde nicht gelesen"
+    }
   }
 }

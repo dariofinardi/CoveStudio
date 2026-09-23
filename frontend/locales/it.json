@@ -1371,5 +1371,22 @@
     "modeReflow": "Riflusso",
     "switchToReflow": "Passa al riflusso — abbandona la geometria della pagina e riempie la larghezza del pannello con testo a flusso",
     "switchToFit": "Passa ad Adatta A4 — mantiene la geometria della pagina e la scala per riempire la larghezza del pannello"
+  },
+  "Ingest": {
+    "badge": "non leggibile",
+    "toastTitle": "Documento non leggibile",
+    "reason": {
+      "scanned_pdf": "il PDF non contiene testo selezionabile: è una scansione o un'immagine",
+      "image_only": "il documento non contiene testo: probabilmente solo immagini",
+      "empty_file": "il file è vuoto",
+      "office_no_text": "dal file non è stato possibile estrarre testo",
+      "image_needs_vision_model": "è un'immagine e il modello in uso non legge le immagini: scegline uno multimodale nelle impostazioni",
+      "encrypted_pdf": "il PDF è protetto da password: rimuovi la protezione e ricarica il file",
+      "unsupported_format": "formato non supportato",
+      "corrupt_file": "il file è danneggiato o non è del formato che l'estensione dichiara",
+      "read_failed": "lettura non riuscita",
+      "text_layer_unreliable": "il testo estratto potrebbe non corrispondere a quanto stampato: verifica il documento originale",
+      "unknown": "il documento non è stato letto"
+    }
   }
 }

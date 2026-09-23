@@ -852,6 +852,12 @@ pub struct DocPayload {
     /// Set when `text` holds only excerpts because the whole document did
     /// not fit the model's context window.
     pub excerpt: Option<attachment_budget::ExcerptInfo>,
+    /// Why this document carries no usable text, when that is the case:
+    /// a canonical code from `crate::ingest` (`scanned_pdf`,
+    /// `encrypted_pdf`, `unsupported_format`, …). The prompt states it
+    /// so the model says "I could not read this" instead of answering
+    /// from an empty block, which is what it used to do.
+    pub unreadable: Option<String>,
 }
 
 const MAX_PDF_IMAGE_PAGES: usize = 8;
@@ -896,7 +902,11 @@ fn emit_doc_extract(
     let _ = tx.try_send(Ok(Event::default().data(payload.to_string())));
 }
 
-async fn load_attached_docs(
+/// Reachable from the integration tests: this is where attachments
+/// become prompt material, and the only way to check the branches that
+/// matter (text, images, unreadable verdicts) is against a real
+/// database and a real storage.
+pub async fn load_attached_docs(
     state: &AppState,
     user_id: &str,
     document_ids: &[String],
@@ -962,6 +972,7 @@ async fn load_attached_docs(
                 text: Some(stub),
                 images: Vec::new(),
                 excerpt: None,
+                unreadable: None,
             });
             continue;
         }
@@ -1031,6 +1042,7 @@ async fn load_attached_docs(
                     text: Some(final_text),
                     images: Vec::new(),
                     excerpt: None,
+                    unreadable: None,
                 });
                 continue;
             }
@@ -1046,24 +1058,12 @@ async fn load_attached_docs(
             text: None,
             images: Vec::new(),
             excerpt: None,
+            unreadable: None,
         };
 
+        // Images are not the funnel's business: there is no text to
+        // extract, only bytes to hand to a vision-capable model.
         match file_type.as_str() {
-            "docx" => {
-                payload.text = crate::pdf::extract_docx_text(&bytes).ok();
-            }
-            "rtf" => {
-                let raw = String::from_utf8_lossy(&bytes);
-                payload.text = rtf_parser::RtfDocument::try_from(raw.as_ref())
-                    .map(|d| d.get_text())
-                    .ok();
-            }
-            "xlsx" | "xls" | "xlsb" | "ods" => {
-                payload.text = crate::pdf::extract_xlsx_text(&bytes).ok();
-            }
-            "txt" | "md" | "csv" => {
-                payload.text = Some(String::from_utf8_lossy(&bytes).to_string());
-            }
             "png" => {
                 if vision_ok {
                     use base64::{engine::general_purpose::STANDARD, Engine as _};
@@ -1074,6 +1074,12 @@ async fn load_attached_docs(
                 } else {
                     tracing::warn!(
                         "[chat] {filename}: PNG attached but selected model is not vision-capable"
+                    );
+                    // The prompt must still mention the file: silence
+                    // here means the model answers as if nothing had
+                    // been attached.
+                    payload.unreadable = Some(
+                        crate::ingest::outcome::no_text::IMAGE_NEEDS_VISION_MODEL.to_string(),
                     );
                 }
             }
@@ -1087,6 +1093,12 @@ async fn load_attached_docs(
                 } else {
                     tracing::warn!(
                         "[chat] {filename}: JPEG attached but selected model is not vision-capable"
+                    );
+                    // The prompt must still mention the file: silence
+                    // here means the model answers as if nothing had
+                    // been attached.
+                    payload.unreadable = Some(
+                        crate::ingest::outcome::no_text::IMAGE_NEEDS_VISION_MODEL.to_string(),
                     );
                 }
             }
@@ -1114,55 +1126,93 @@ async fn load_attached_docs(
                     tracing::warn!(
                         "[chat] {filename}: TIFF attached but selected model is not vision-capable"
                     );
+                    // The prompt must still mention the file: silence
+                    // here means the model answers as if nothing had
+                    // been attached.
+                    payload.unreadable = Some(
+                        crate::ingest::outcome::no_text::IMAGE_NEEDS_VISION_MODEL.to_string(),
+                    );
                 }
             }
-            "pdf" => {
-                #[cfg(feature = "pdf")]
-                {
-                    let tmp = std::env::temp_dir().join(crate::product::temp_file_name(&format!("{doc_id}.pdf")));
-                    if std::fs::write(&tmp, &bytes).is_ok() {
-                        let pages = crate::pdf::extract_text(&tmp).ok();
-                        if let Some(pages) = pages {
-                            let scanned = crate::pdf::is_scanned_pdf(&pages);
-                            let mut full_text = String::new();
-                            for p in &pages {
-                                full_text.push_str(&format!("[Page {}]\n{}\n", p.page, p.text));
-                            }
-                            if !scanned {
-                                payload.text = Some(full_text);
-                            } else if vision_ok {
-                                tracing::info!(
-                                    "[chat] {filename}: scanned PDF detected, rendering up to {MAX_PDF_IMAGE_PAGES} pages at {PDF_RENDER_DPI} DPI"
-                                );
-                                match crate::pdf::render_pdf_pages(
-                                    &tmp,
-                                    PDF_RENDER_DPI,
-                                    MAX_PDF_IMAGE_PAGES,
-                                ) {
-                                    Ok(pngs) => {
-                                        payload.images = pages_to_data_urls(pngs);
-                                    }
-                                    Err(e) => {
-                                        tracing::warn!("[chat] render PDF pages failed: {e}");
+            // Everything else goes through the onboarding funnel, the
+            // same one the upload route and the folder scanner use. A
+            // scanned PDF comes back as `no_text` with the
+            // `scanned_pdf` code, which is exactly when the
+            // render-pages-for-vision path applies.
+            _ => {
+                let tmp = std::env::temp_dir().join(crate::product::temp_file_name(
+                    &format!("{doc_id}.{file_type}"),
+                ));
+                if std::fs::write(&tmp, &bytes).is_ok() {
+                    let for_ingest = tmp.clone();
+                    match tokio::task::spawn_blocking(move || {
+                        crate::ingest::ingest_blocking(&for_ingest)
+                    })
+                    .await
+                    {
+                        Ok(Ok(doc)) => {
+                            if doc.has_text() {
+                                payload.text = Some(doc.text);
+                            } else {
+                                let code = doc
+                                    .outcome
+                                    .code()
+                                    .unwrap_or(crate::ingest::outcome::no_text::EMPTY_FILE);
+                                let scanned =
+                                    code == crate::ingest::outcome::no_text::SCANNED_PDF;
+                                #[cfg(feature = "pdf")]
+                                if scanned && vision_ok {
+                                    tracing::info!(
+                                        "[chat] {filename}: scanned PDF, rendering up to                                          {MAX_PDF_IMAGE_PAGES} pages at {PDF_RENDER_DPI} DPI"
+                                    );
+                                    match crate::pdf::render_pdf_pages(
+                                        &tmp,
+                                        PDF_RENDER_DPI,
+                                        MAX_PDF_IMAGE_PAGES,
+                                    ) {
+                                        Ok(pngs) => payload.images = pages_to_data_urls(pngs),
+                                        Err(e) => {
+                                            tracing::warn!(
+                                                "[chat] {filename}: rendering pages failed: {e}"
+                                            );
+                                        }
                                     }
                                 }
-                            } else {
-                                tracing::warn!(
-                                    "[chat] {filename}: scanned PDF but the selected model is not vision-capable; sending what little text was extracted"
-                                );
-                                payload.text = Some(full_text);
+                                // Whatever we could or could not do, the
+                                // prompt says so: an empty block used to
+                                // be indistinguishable from a document
+                                // that simply said nothing.
+                                if payload.images.is_empty() {
+                                    tracing::info!(
+                                        "[chat] {filename}: no usable text ({code})"
+                                    );
+                                    payload.unreadable = Some(code.to_string());
+                                }
                             }
                         }
-                        let _ = std::fs::remove_file(&tmp);
+                        Ok(Err(e)) => {
+                            let code = e
+                                .downcast_ref::<crate::ingest::IngestError>()
+                                .map(|ie| ie.kind.to_string())
+                                .unwrap_or_else(|| {
+                                    crate::ingest::outcome::failure::READ_FAILED.to_string()
+                                });
+                            tracing::warn!("[chat] {filename}: could not be read ({code}): {e:#}");
+                            payload.unreadable = Some(code);
+                        }
+                        Err(e) => {
+                            tracing::warn!("[chat] {filename}: ingest task failed: {e:?}");
+                            payload.unreadable = Some(
+                                crate::ingest::outcome::failure::READ_FAILED.to_string(),
+                            );
+                        }
                     }
+                    let _ = std::fs::remove_file(&tmp);
+                } else {
+                    tracing::warn!("[chat] {filename}: could not stage the file for reading");
+                    payload.unreadable =
+                        Some(crate::ingest::outcome::failure::READ_FAILED.to_string());
                 }
-                #[cfg(not(feature = "pdf"))]
-                {
-                    tracing::warn!("[chat] PDF document {doc_id} skipped: pdf feature not enabled");
-                }
-            }
-            _ => {
-                tracing::warn!("[chat] unsupported file_type={file_type} for {filename}");
             }
         }
 

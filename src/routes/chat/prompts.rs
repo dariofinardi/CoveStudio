@@ -18,15 +18,68 @@ use super::{CorpusInventoryEntry, DocPayload, McpDiscovered, RetrievedKbEntry};
 /// Separator between the sections of the system prompt.
 pub(super) const SECTION_SEPARATOR: &str = "\n\n---\n\n";
 
+/// What to tell the model about a document it cannot read. Keyed on the
+/// canonical codes from `crate::ingest`.
+///
+/// The sentence matters more than it looks: without it the model gets an
+/// empty block under a filename and answers anyway, which is how a
+/// confident answer about an unread document happens. With it, the model
+/// can say what is true — the document is there, its content is not.
+fn unreadable_note(code: &str) -> &'static str {
+    use crate::ingest::outcome::{failure, no_text};
+    match code {
+        no_text::SCANNED_PDF => {
+            "NON LEGGIBILE: è una scansione o un'immagine, senza testo selezionabile. \
+             Non hai il contenuto di questo documento: dillo all'utente e suggerisci di \
+             attivare l'OCR nelle impostazioni o di usare un modello che legge le immagini"
+        }
+        no_text::IMAGE_ONLY => {
+            "NON LEGGIBILE: il documento non contiene testo, probabilmente solo immagini. \
+             Non hai il suo contenuto: dillo all'utente"
+        }
+        no_text::EMPTY_FILE => "NON LEGGIBILE: il file è vuoto",
+        no_text::IMAGE_NEEDS_VISION_MODEL => {
+            "NON LEGGIBILE: è un'immagine e il modello in uso non legge le immagini. Non hai              il suo contenuto: dillo all'utente e suggerisci di scegliere un modello              multimodale nelle impostazioni"
+        }
+        no_text::OFFICE_NO_TEXT => {
+            "NON LEGGIBILE: dal file non è stato possibile estrarre testo. Non hai il suo \
+             contenuto: dillo all'utente"
+        }
+        failure::ENCRYPTED_PDF => {
+            "NON LEGGIBILE: il PDF è protetto da password. Non hai il suo contenuto: \
+             dillo all'utente e chiedi una copia senza protezione"
+        }
+        failure::UNSUPPORTED_FORMAT => {
+            "NON LEGGIBILE: formato non supportato. Non hai il suo contenuto: dillo \
+             all'utente"
+        }
+        failure::CORRUPT_FILE => {
+            "NON LEGGIBILE: il file è danneggiato o non è del formato che l'estensione \
+             dichiara. Non hai il suo contenuto: dillo all'utente"
+        }
+        // Includes `read_failed` and anything a future version adds:
+        // the wording stays true even when the cause is unknown.
+        _ => {
+            "NON LEGGIBILE: la lettura del file non è riuscita. Non hai il suo contenuto: \
+             dillo all'utente"
+        }
+    }
+}
+
 /// Block with the documents attached to the chat: full text for the
-/// readable ones, header only for those sent as images.
+/// readable ones, a header for those sent as images, and a stated
+/// verdict for those that could not be read.
 /// Labels start at `doc-1` and follow the order of `doc_ids`,
 /// matching the label → UUID map built by the caller.
 pub(super) fn build_doc_system_prompt(docs: &[DocPayload]) -> String {
     let text_docs = docs.iter().filter(|d| d.text.is_some());
     let image_docs = docs.iter().filter(|d| !d.images.is_empty());
+    let unreadable_docs = docs
+        .iter()
+        .filter(|d| d.text.is_none() && d.images.is_empty() && d.unreadable.is_some());
     let n_text = text_docs.clone().count();
-    if n_text == 0 && image_docs.clone().next().is_none() {
+    let n_images = image_docs.clone().count();
+    if n_text == 0 && n_images == 0 && unreadable_docs.clone().next().is_none() {
         return String::new();
     }
 
@@ -71,6 +124,20 @@ pub(super) fn build_doc_system_prompt(docs: &[DocPayload]) -> String {
             n_text + i + 1,
             d.filename,
             d.images.len()
+        );
+    }
+    // Documents that reached us but carry nothing usable. They keep a
+    // doc-N label: the user attached them and may ask about them by
+    // name, and an answer that silently ignores one of three attached
+    // files is worse than one that says which it could not read.
+    for (i, d) in unreadable_docs.enumerate() {
+        let code = d.unreadable.as_deref().unwrap_or_default();
+        let _ = write!(
+            s,
+            "=== doc-{} (file: {}) — {} ===\n\n",
+            n_text + n_images + i + 1,
+            d.filename,
+            unreadable_note(code)
         );
     }
     s
@@ -450,7 +517,87 @@ mod tests {
             text: text.map(str::to_string),
             images: vec![String::new(); images],
             excerpt: None,
+            unreadable: None,
         }
+    }
+
+    fn unreadable_doc(name: &str, code: &str) -> DocPayload {
+        DocPayload {
+            unreadable: Some(code.to_string()),
+            ..doc(name, None, 0)
+        }
+    }
+
+    #[test]
+    fn an_unreadable_document_is_declared_to_the_model() {
+        // The defect this fixes: the document appeared in the prompt
+        // as a filename over an empty block, and the model answered
+        // about it anyway.
+        let docs = vec![unreadable_doc(
+            "scansione.pdf",
+            crate::ingest::outcome::no_text::SCANNED_PDF,
+        )];
+        let prompt = build_doc_system_prompt(&docs);
+        assert!(prompt.contains("scansione.pdf"), "{prompt}");
+        assert!(prompt.contains("NON LEGGIBILE"), "{prompt}");
+        // The one case with an actionable answer must name it.
+        assert!(prompt.contains("OCR"), "{prompt}");
+        assert!(
+            prompt.contains("dillo all'utente"),
+            "the model must be told to say so: {prompt}"
+        );
+    }
+
+    #[test]
+    fn unreadable_documents_keep_a_label_after_the_readable_ones() {
+        // Labels must not collide: the tools resolve doc-N, and a
+        // duplicate would send read_document to the wrong file.
+        let docs = vec![
+            doc("contratto.txt", Some("testo"), 0),
+            doc("scansione.pdf", None, 3),
+            unreadable_doc(
+                "protetto.pdf",
+                crate::ingest::outcome::failure::ENCRYPTED_PDF,
+            ),
+        ];
+        let prompt = build_doc_system_prompt(&docs);
+        assert!(prompt.contains("doc-1 (file: contratto.txt)"), "{prompt}");
+        assert!(prompt.contains("doc-2 (file: scansione.pdf"), "{prompt}");
+        assert!(prompt.contains("doc-3 (file: protetto.pdf)"), "{prompt}");
+        assert_eq!(prompt.matches("doc-3").count(), 1, "{prompt}");
+        assert!(prompt.contains("password"), "{prompt}");
+    }
+
+    #[test]
+    fn every_code_has_a_note_and_none_is_silent() {
+        use crate::ingest::outcome::{failure, no_text};
+        for code in [
+            no_text::SCANNED_PDF,
+            no_text::IMAGE_ONLY,
+            no_text::EMPTY_FILE,
+            no_text::OFFICE_NO_TEXT,
+            failure::ENCRYPTED_PDF,
+            failure::UNSUPPORTED_FORMAT,
+            failure::CORRUPT_FILE,
+            failure::READ_FAILED,
+            // A code this build does not know yet must still produce a
+            // true sentence rather than an empty one.
+            "qualcosa_di_nuovo",
+        ] {
+            let note = unreadable_note(code);
+            assert!(note.contains("NON LEGGIBILE"), "{code}: {note}");
+        }
+    }
+
+    #[test]
+    fn a_turn_with_only_unreadable_documents_still_builds_a_block() {
+        // Otherwise the model would see no mention of the attachment at
+        // all and answer as if the user had sent nothing.
+        let docs = vec![unreadable_doc(
+            "vuoto.txt",
+            crate::ingest::outcome::no_text::EMPTY_FILE,
+        )];
+        assert!(!build_doc_system_prompt(&docs).is_empty());
     }
 
     #[test]

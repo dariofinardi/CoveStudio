@@ -1371,5 +1371,22 @@
     "modeReflow": "Reflow",
     "switchToReflow": "Switch to reflow mode — drops the page geometry, fills the panel width with reflowed prose",
     "switchToFit": "Switch to A4 fit — preserves the document page geometry and scales it to fit the panel width"
+  },
+  "Ingest": {
+    "badge": "unreadable",
+    "toastTitle": "Document could not be read",
+    "reason": {
+      "scanned_pdf": "the PDF has no selectable text: it is a scan or an image",
+      "image_only": "the document carries no text, probably only images",
+      "empty_file": "the file is empty",
+      "office_no_text": "no text could be extracted from the file",
+      "image_needs_vision_model": "it is an image and the selected model does not read images: pick a multimodal one in settings",
+      "encrypted_pdf": "the PDF is password-protected: remove the protection and upload it again",
+      "unsupported_format": "unsupported format",
+      "corrupt_file": "the file is damaged, or is not the format its extension claims",
+      "read_failed": "reading failed",
+      "text_layer_unreliable": "the extracted text may not match what is printed: check the original document",
+      "unknown": "the document was not read"
+    }
   }
 }

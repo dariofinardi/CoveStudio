@@ -1371,5 +1371,22 @@
     "modeReflow": "Reflux",
     "switchToReflow": "Passer au mode reflux — abandonne la géométrie de la page et remplit la largeur du panneau avec le texte refluant",
     "switchToFit": "Passer à Ajuster A4 — préserve la géométrie de la page et l'adapte à la largeur du panneau"
+  },
+  "Ingest": {
+    "badge": "illisible",
+    "toastTitle": "Document illisible",
+    "reason": {
+      "scanned_pdf": "le PDF ne contient pas de texte sélectionnable : c'est un scan ou une image",
+      "image_only": "le document ne contient pas de texte, probablement que des images",
+      "empty_file": "le fichier est vide",
+      "office_no_text": "aucun texte n'a pu être extrait du fichier",
+      "image_needs_vision_model": "c'est une image et le modèle choisi ne lit pas les images : choisissez-en un multimodal dans les réglages",
+      "encrypted_pdf": "le PDF est protégé par mot de passe : retirez la protection et rechargez le fichier",
+      "unsupported_format": "format non pris en charge",
+      "corrupt_file": "le fichier est endommagé, ou n'est pas du format annoncé par son extension",
+      "read_failed": "échec de la lecture",
+      "text_layer_unreliable": "le texte extrait peut différer de ce qui est imprimé : vérifiez le document d'origine",
+      "unknown": "le document n'a pas été lu"
+    }
   }
 }

@@ -132,7 +132,13 @@ mod tests {
     use super::*;
 
     fn doc(name: &str, text: &str) -> DocPayload {
-        DocPayload { filename: name.into(), text: Some(text.into()), images: vec![], excerpt: None }
+        DocPayload {
+            filename: name.into(),
+            text: Some(text.into()),
+            images: vec![],
+            excerpt: None,
+            unreadable: None,
+        }
     }
 
     fn pages(n: usize, filler: &str) -> String {

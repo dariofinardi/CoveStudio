@@ -16,6 +16,67 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.9.3 — 2026-09-23 (one funnel, and the verdict reaches the reader)
+
+v0.9.1 built the funnel; this release makes everything use it and makes
+the answer visible. The three extractors are gone: the folder scanner,
+the chat attachment loader and the assistant's own tools all read
+through `crate::ingest` now. The worst of the three was the tools' —
+every failure became `unwrap_or_default()`, so `read_document` on a
+password-protected PDF returned an empty string and the model could not
+tell "this document is empty" from "this document could not be read".
+
+### Added
+
+* **The prompt states the verdict.** An attachment that yielded no
+  usable text appears in the prompt under its own `doc-N` label with a
+  sentence saying so and what to suggest — turn OCR on for a scan, ask
+  for an unprotected copy of an encrypted PDF. The same applies to an
+  image attached while the selected model cannot read images, which used
+  to produce nothing but a line in the log.
+* **The composer says it too**, in all six languages: a warning toast at
+  upload time — while the user still has the file in hand and can act —
+  and a marked chip for as long as the attachment is there. The stored
+  value is a canonical code (`scanned_pdf`, `encrypted_pdf`, …); the
+  interface translates it, and an unknown code still produces a true
+  sentence rather than silence.
+* **CSV, `.doc`, `.ppt`, `.pps` and `.xlsm`** are readable and declared
+  everywhere they matter: the file picker, the upload classifier and the
+  synced-folder extensions. `.doc` was previously offered in the picker
+  while nothing could read it, and `.ppt` was not offered at all.
+
+### Fixed
+
+* **A scanned PDF was reported as readable.** The library returns a
+  single section titled "PDF (nessun testo estraibile)" for a PDF with
+  no text layer; counted as a heading, it declared the scan `ready` and
+  handed the model that sentence as though it were the document's
+  content. Found with a real scanned fixture, not by reading the code.
+* Plain text arrived with its first line twice (the parser uses it as
+  both the section title and the body), and CSV arrived under a heading
+  called "Introduzione" that no author wrote. Both are suppressed; the
+  structure keeps them, the text the model reads does not.
+* `.csv` is unknown to the library's format detector, so it came back
+  "unsupported" — it is read as plain text in the boundary, where our
+  conventions belong. Reported upstream (pageindex-rs#1).
+
+### Notes
+
+* Verified: 544 unit tests, 18 functional tests over real files
+  (including a scan, a legacy `.doc` and a legacy `.ppt`), 9 tests of the
+  chat attachment loader — which had no coverage at all before this
+  release — 7 upload tests, and 64 frontend tests.
+* Fixtures for the scanned and legacy-Office cases now ship in
+  `tests/fixtures/` with a README explaining what each one defends.
+* A tampered-text-layer pre-check runs on PDF and DOCX through
+  `chk_defaced`. It catches altered font tables; a PDF whose text layer
+  is simply unusable garbage is a different case, and the answer to that
+  one is OCR — deliberately not approximated with a threshold, because
+  the library's own authors document why an absolute plausibility
+  threshold misfires on table-heavy documents.
+
+---
+
 ## v0.9.2 — 2026-09-18 (a document says whether it could be read)
 
 Uploads used to be stored as `ready` whatever extraction produced. A

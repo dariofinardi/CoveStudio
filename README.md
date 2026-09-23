@@ -126,6 +126,28 @@ runs inside the same process. The screenshots show the Italian interface.
 
 ## Features
 
+### Reading documents
+
+- One funnel for every file, whatever its way in — upload, chat
+  attachment, synced folder, assistant tool: PDF (with a `pdfium`
+  fallback), DOCX, the legacy Office family (`.doc`, `.ppt`, `.rtf`),
+  spreadsheets (`.xlsx`, `.xlsm`, `.xlsb`, `.xls`, `.ods`), CSV,
+  Markdown and plain text. Sheets arrive as Markdown tables, one section
+  per worksheet; slides, one per slide.
+- **A document says whether it could be read.** A scan with no text
+  layer, a password-protected PDF, a file whose extension lies: each is
+  stored as `no_text` or `failed` with a canonical reason, shown in the
+  composer in the user's language and stated in the prompt, so the
+  assistant says "I could not read this" instead of answering from an
+  empty block. The same holds for an image attached to a model that does
+  not read images.
+- Page markers (`[Page N]`) are derived from the document's own
+  structure — the section tree the parser returns — rather than pasted
+  onto the text, which is what citations resolve against.
+- A tamper pre-check runs on PDFs and DOCX: a text layer that disagrees
+  with what is printed (altered `cmap`/`ToUnicode` tables) is flagged
+  rather than passed on as if it were the document.
+
 ### Assistant and citations
 
 - Chat with documents attached from disk, from a project or from the
@@ -272,9 +294,10 @@ Tauri webview (Svelte 5 + Vite)
 axum backend (127.0.0.1:<port chosen by the OS>)
    ├── SQLite + sqlite-vec   cove-studio.db   schema, settings, chats, embeddings
    ├── fastembed / ort       multilingual-e5-base INT8 (CPU, DirectML)
-   ├── pdfium-render         PDF text and page rendering
-   ├── quick-xml + zip       DOCX extraction and generation
-   ├── calamine, rtf-parser  spreadsheets, RTF
+   ├── pageindex-rs          one funnel: format detection, text, sections
+   ├── pdfium-render         PDF page rendering, PDF text fallback
+   ├── quick-xml + zip       DOCX generation
+   ├── chk_defaced           tampered text-layer pre-check
    ├── GLiNER2 (optional)    personal-data redaction
    ├── LLM providers         Anthropic, Gemini, OpenAI, Mistral, local
    └── MCP client            HTTP/SSE servers, local or remote

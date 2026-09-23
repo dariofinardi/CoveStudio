@@ -173,3 +173,8 @@ docs/mike-upstream/
 # connectors. Third-party code; kept on disk for reference, never
 # committed into this repo.
 new_analysis/
+
+# Client material dropped in the working tree for analysis — real
+# company data and third-party questionnaires. Never committed: this
+# repository is public.
+/rctop/

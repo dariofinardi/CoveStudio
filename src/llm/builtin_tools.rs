@@ -334,7 +334,7 @@ async fn read_doc_text_for_llm(
             },
             Err(e) => return Err(format!("storage backend unavailable: {e}")),
         };
-        Ok(extract_text(file_type, filename, &bytes))
+        extract_text(file_type, filename, &bytes)
     }
 }
 
@@ -1113,40 +1113,38 @@ fn sanitize_filename(s: &str) -> String {
     cleaned.chars().take(60).collect::<String>().trim().to_string()
 }
 
-fn extract_text(file_type: &str, filename: &str, bytes: &[u8]) -> String {
-    match file_type {
-        "docx" => crate::pdf::extract_docx_text(bytes).unwrap_or_default(),
-        "rtf" => {
-            // Same path the sync scanner uses — RtfDocument::get_text()
-            // returns the body without control words / fonts / pictures.
-            let raw = String::from_utf8_lossy(bytes);
-            rtf_parser::RtfDocument::try_from(raw.as_ref())
-                .map(|d| d.get_text())
-                .unwrap_or_default()
-        }
-        "xlsx" | "xls" | "xlsb" | "ods" => {
-            crate::pdf::extract_xlsx_text(bytes).unwrap_or_default()
-        }
-        "txt" | "md" | "csv" => String::from_utf8_lossy(bytes).to_string(),
-        "pdf" => {
-            #[cfg(feature = "pdf")]
-            {
-                let tmp = std::env::temp_dir().join(crate::product::temp_file_name(&format!("builtin-{filename}")));
-                if std::fs::write(&tmp, bytes).is_ok() {
-                    let out = crate::pdf::extract_full_text(&tmp).unwrap_or_default();
-                    let _ = std::fs::remove_file(&tmp);
-                    out
-                } else {
-                    String::new()
-                }
-            }
-            #[cfg(not(feature = "pdf"))]
-            {
-                let _ = filename;
-                String::new()
-            }
-        }
-        _ => String::new(),
+/// Text of a document for the LLM tools, through the onboarding
+/// funnel — the same one the upload route, the folder scanner and the
+/// chat loader use.
+///
+/// This used to be the third copy of the per-format dispatch, and the
+/// worst behaved: every failure became `unwrap_or_default()`, so
+/// `read_document` on a protected PDF answered with an empty string
+/// and the model had no way to tell "this document is empty" from
+/// "this document could not be read". Now an unreadable file produces
+/// an error the tool surfaces, and the model can say so.
+fn extract_text(file_type: &str, filename: &str, bytes: &[u8]) -> Result<String, String> {
+    // The extension drives detection, and `filename` is what the user
+    // named the file; `file_type` is our stored classification and is
+    // the better hint when the name has no extension (generated
+    // documents are stored under their id).
+    let hint = if std::path::Path::new(filename).extension().is_some() {
+        filename.to_string()
+    } else {
+        format!("{filename}.{file_type}")
+    };
+    match crate::ingest::ingest_bytes(&hint, bytes) {
+        Ok(doc) if doc.has_text() => Ok(doc.text),
+        Ok(doc) => Err(format!(
+            "document {filename} carries no usable text ({})",
+            doc.outcome.code().unwrap_or("unknown")
+        )),
+        Err(e) => Err(format!(
+            "document {filename} could not be read ({})",
+            e.downcast_ref::<crate::ingest::IngestError>()
+                .map(|ie| ie.kind)
+                .unwrap_or(crate::ingest::outcome::failure::READ_FAILED)
+        )),
     }
 }
 
@@ -1427,14 +1425,32 @@ mod tests {
 
     #[test]
     fn extract_text_handles_text_formats() {
-        assert_eq!(extract_text("txt", "x.txt", b"hello"), "hello");
-        assert_eq!(extract_text("md", "x.md", b"# title"), "# title");
-        assert_eq!(extract_text("csv", "x.csv", b"a,b,c\n1,2,3"), "a,b,c\n1,2,3");
+        assert_eq!(extract_text("txt", "x.txt", b"hello").unwrap(), "hello");
+        // Markdown arrives without its hashes: the text goes to a
+        // model as context, not as Markdown to re-render.
+        assert_eq!(extract_text("md", "x.md", b"# title").unwrap(), "title");
+        assert_eq!(
+            extract_text("csv", "x.csv", b"a,b,c\n1,2,3").unwrap(),
+            "a,b,c\n1,2,3"
+        );
     }
 
     #[test]
-    fn extract_text_unknown_format_returns_empty() {
-        assert_eq!(extract_text("zip", "x.zip", b"PK\x03\x04"), "");
-        assert_eq!(extract_text("", "x", b"data"), "");
+    fn extract_text_reports_why_a_document_could_not_be_read() {
+        // This is the behaviour change that matters: the old code
+        // returned an empty string for anything it could not read, so
+        // `read_document` on a protected PDF and on an genuinely empty
+        // file looked identical to the model.
+        let err = extract_text("zip", "x.zip", b"PK\x03\x04").unwrap_err();
+        assert!(err.contains("x.zip"), "{err}");
+        assert!(err.contains("unsupported_format"), "{err}");
+    }
+
+    #[test]
+    fn extract_text_uses_the_stored_type_when_the_name_has_no_extension() {
+        // Generated documents are stored under their id, with no
+        // extension in the name; the classification is what tells the
+        // funnel how to read them.
+        assert_eq!(extract_text("txt", "no-extension", b"contenuto").unwrap(), "contenuto");
     }
 }

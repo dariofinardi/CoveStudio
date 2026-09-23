@@ -37,7 +37,11 @@ export const documentsApi = {
       file_type: string
       size_bytes: number
       domain: Domain
+      /** `ready`, `no_text` or `failed` — see src/ingest/outcome.rs. */
       status: string
+      /** Canonical code (plus optional detail) when status is not
+       *  `ready`; null otherwise. */
+      extraction_reason: string | null
     }>('/document', { method: 'POST', multipart: fd })
   },
 

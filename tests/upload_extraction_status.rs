@@ -244,14 +244,73 @@ async fn an_unsupported_format_is_recorded_rather_than_accepted_silently() {
     let (code, body) = upload(app, &token, "archivio.zip", b"PK\x03\x04qualcosa").await;
     assert_eq!(code, StatusCode::OK, "{body}");
     assert_eq!(body["status"], "failed", "{body}");
-    let reason = body["extraction_reason"].as_str().unwrap_or_default();
-    assert!(
-        reason.contains("formato") || reason.contains("lettura"),
-        "the reason should name the problem: {reason}"
-    );
+    // The stored reason is a canonical code the interface translates,
+    // not a sentence: an Italian string in the database could not be
+    // shown in the other five languages.
+    assert_eq!(body["extraction_reason"], "unsupported_format", "{body}");
 
     let (status, _) = stored_status(state, body["id"].as_str().unwrap()).await;
     assert_eq!(status, "failed");
+}
+
+#[tokio::test]
+async fn a_csv_is_stored_as_ready_and_keeps_its_rows() {
+    // CSV matters on its own: the tabular workflows parse the rows,
+    // and the library's format detector does not know the extension at
+    // all — the boundary reads it as plain text.
+    let f = fresh_app().await;
+    let (app, state) = (&f.app, &f.state);
+    let token = make_user_and_token(state).await;
+
+    let csv = "Voce;Importo
+Canone locazione;1200,50
+Spese condominiali;180,00
+";
+    let (code, body) = upload(app, &token, "prospetto.csv", csv.as_bytes()).await;
+    assert_eq!(code, StatusCode::OK, "{body}");
+    assert_eq!(body["status"], "ready", "{body}");
+    assert_eq!(body["file_type"], "csv", "{body}");
+
+    let doc_id = body["id"].as_str().unwrap();
+    let path: (Option<String>,) =
+        sqlx::query_as("SELECT extracted_text_path FROM documents WHERE id = ?")
+            .bind(doc_id)
+            .fetch_one(&state.db)
+            .await
+            .expect("row");
+    let storage = cove_studio::storage::make_storage().expect("storage");
+    let text = String::from_utf8_lossy(
+        &storage.get(&path.0.expect("text path")).await.expect("cached text"),
+    )
+    .into_owned();
+    // Separators and row order are the document: nothing may be
+    // reordered, and nothing may be inserted in front.
+    assert!(text.starts_with("Voce;Importo"), "{text}");
+    assert!(text.contains("Canone locazione;1200,50"), "{text}");
+    assert!(!text.contains("Introduzione"), "{text}");
+}
+
+#[tokio::test]
+async fn legacy_office_extensions_are_classified_rather_than_other() {
+    // `.doc` used to be offered in the composer while nothing could
+    // read it; `.ppt` was not offered at all. Both are readable now, so
+    // both must be classified — `other` would send them down the
+    // "unsupported" path in every later branch.
+    let f = fresh_app().await;
+    let (app, state) = (&f.app, &f.state);
+    let token = make_user_and_token(state).await;
+
+    for (name, expected) in [("relazione.doc", "doc"), ("slide.ppt", "ppt")] {
+        // Not valid binary Office content, so extraction fails — what
+        // this asserts is the classification, not the parse.
+        let (code, body) = upload(app, &token, name, b"contenuto non valido").await;
+        assert_eq!(code, StatusCode::OK, "{body}");
+        assert_eq!(body["file_type"], expected, "{name}: {body}");
+        assert_ne!(
+            body["status"], "ready",
+            "{name} could not be parsed, so it must not claim to be ready: {body}"
+        );
+    }
 }
 
 #[tokio::test]

@@ -12,6 +12,7 @@
   import PickerModal from '$lib/components/ui/PickerModal.svelte'
   import type { PickerItem } from '$lib/components/ui/PickerModal.svelte'
   import { i18n } from '$lib/stores/i18n.svelte'
+  import { extractionMessage, isUnreadable } from '$lib/types/extraction'
   import { modelsStore } from '$lib/stores/models.svelte'
   import { userApi } from '$lib/api/user'
   import { composerPrefill } from '$lib/stores/composer.svelte'
@@ -39,11 +40,12 @@
     Upload,
     FolderSearch,
     ChevronDown,
+    AlertTriangle,
   } from 'lucide-svelte'
 
   /** Formats the backend can ingest (plus images for multimodal models). */
   const UPLOAD_ACCEPT =
-    '.pdf,.docx,.doc,.rtf,.xlsx,.xls,.xlsb,.ods,.csv,.txt,.md,.png,.jpg,.jpeg,.tiff'
+    '.pdf,.docx,.doc,.rtf,.xlsx,.xlsm,.xls,.xlsb,.ods,.csv,.ppt,.pps,.txt,.md,.png,.jpg,.jpeg,.tiff'
 
   interface Props {
     streaming: boolean
@@ -268,7 +270,24 @@
       for (const f of chosen) {
         // `cache` — composer uploads live in the cache pool.
         const doc = await documentsApi.upload(f, { cache: true })
-        files = [...files, { document_id: doc.id, filename: doc.filename }]
+        files = [
+          ...files,
+          {
+            document_id: doc.id,
+            filename: doc.filename,
+            extractionStatus: doc.status,
+            extractionReason: doc.extraction_reason,
+          },
+        ]
+        // Said now, while the user is still holding the file and can do
+        // something about it — export the PDF again, remove the
+        // password, pick a multimodal model. Discovering it from a
+        // vague answer three turns later is the failure we are ending.
+        if (isUnreadable(doc.status)) {
+          toastStore.warning(t('Ingest.toastTitle'), {
+            detail: `${doc.filename} — ${extractionMessage(doc.extraction_reason)}`,
+          })
+        }
       }
     } catch (err) {
       toastStore.danger(t('Documents.viewer.errorLoading'), {
@@ -486,8 +505,17 @@
   {#if hasAttachments}
     <div class="flex flex-wrap gap-1.5 px-3 pt-3">
       {#each files as f (f.document_id)}
-        <Badge tone="neutral">
+        <Badge tone={isUnreadable(f.extractionStatus) ? 'warning' : 'neutral'}>
           <span class="inline-flex items-center gap-1.5">
+            {#if isUnreadable(f.extractionStatus)}
+              <span
+                class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide"
+                title={extractionMessage(f.extractionReason)}
+              >
+                <AlertTriangle size={11} />
+                {t('Ingest.badge')}
+              </span>
+            {/if}
             <label
               class="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide
                      cursor-pointer select-none"

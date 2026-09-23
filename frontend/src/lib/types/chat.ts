@@ -33,6 +33,14 @@ export interface FileRef {
    *  it into the LLM payload. Toggled by the per-file checkbox in
    *  the chat composer chip. Default false. */
   piiProtected?: boolean
+  /** Client-side only: what onboarding said about this file
+   *  (`documents.status`). Anything other than `ready` means the model
+   *  will not receive its content, and the chip says so instead of
+   *  looking like every other attachment. */
+  extractionStatus?: string
+  /** Canonical code explaining `extractionStatus`, translated for
+   *  display by `lib/types/extraction.ts`. */
+  extractionReason?: string | null
 }
 
 /**
