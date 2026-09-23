@@ -1370,7 +1370,7 @@ dependencies = [
 
 [[package]]
 name = "cove-studio"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -1435,7 +1435,7 @@ dependencies = [
 
 [[package]]
 name = "cove-studio-desktop"
-version = "0.10.2"
+version = "0.10.3"
 dependencies = [
  "anyhow",
  "cove-studio",
