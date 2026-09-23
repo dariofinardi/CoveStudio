@@ -1023,12 +1023,12 @@ async fn exec_edit_document(
     let Some(edits_val) = edits_val else {
         return json!({"error": "edits array is required"}).to_string();
     };
-    let edits: Vec<crate::pdf::docx_writer::DocxEdit> = edits_val
+    let edits: Vec<docx_roundtrip::Edit> = edits_val
         .iter()
         .filter_map(|e| {
             let find = e.get("find").and_then(|v| v.as_str())?.to_string();
             let replace = e.get("replace").and_then(|v| v.as_str())?.to_string();
-            Some(crate::pdf::docx_writer::DocxEdit { find, replace })
+            Some(docx_roundtrip::Edit { find, replace })
         })
         .collect();
     if edits.is_empty() {
@@ -1059,9 +1059,31 @@ async fn exec_edit_document(
         Err(e) => return json!({"error": format!("storage read: {e}")}).to_string(),
     };
 
-    let (new_bytes, hits) = match crate::pdf::docx_writer::apply_text_edits(&bytes, &edits) {
+    // Structural, not textual. Patching `<w:t>` elements missed any
+    // phrase Word had split across runs — which it does after any edit
+    // near the text — and reported success while changing nothing.
+    let mut opened = match docx_roundtrip::open(&bytes) {
         Ok(x) => x,
-        Err(e) => return json!({"error": format!("docx edit: {e}")}).to_string(),
+        Err(e) => return json!({"error": format!("opening the document: {e:#}")}).to_string(),
+    };
+    let hits = docx_roundtrip::apply_text_edits(&mut opened.document, &edits);
+    if hits.iter().all(|h| *h == 0) {
+        // Nothing matched: rewriting the file would only change its
+        // bytes, and telling the model "done" would be a lie it would
+        // repeat to the user.
+        return json!({
+            "error": "none of the edits matched any text in the document",
+            "edits_applied": edits
+                .iter()
+                .map(|e| json!({"find": e.find, "replace": e.replace, "hits": 0}))
+                .collect::<Vec<_>>(),
+        })
+        .to_string();
+    }
+    let assets = docx_roundtrip::Assets::from_opened(&opened);
+    let new_bytes = match docx_roundtrip::write(&opened.document, &assets) {
+        Ok(x) => x,
+        Err(e) => return json!({"error": format!("writing the document: {e:#}")}).to_string(),
     };
 
     if let Err(e) = storage

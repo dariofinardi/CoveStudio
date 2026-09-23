@@ -189,93 +189,14 @@ fn xml_escape(s: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// edit_document — find/replace inside <w:t> runs
+// Editing a .docx lives in the `docx-roundtrip` crate.
+//
+// It used to live here, as find-and-replace over `<w:t>` elements, with a
+// tolerant second pass for text Word had split across runs. The crate does
+// it on the document tree instead — every occurrence, inside tables,
+// headers and footnotes, keeping the formatting of the text replaced — so
+// keeping this copy would only give the two a chance to disagree.
 // ---------------------------------------------------------------------------
-
-pub struct DocxEdit {
-    pub find: String,
-    pub replace: String,
-}
-
-/// Apply text substitutions to a DOCX. Walks `word/document.xml`, replaces
-/// occurrences of `find` with `replace` inside text runs, and rezips the
-/// archive. Returns the new bytes and a per-edit hit count.
-pub fn apply_text_edits(original: &[u8], edits: &[DocxEdit]) -> Result<(Vec<u8>, Vec<usize>)> {
-    let cursor = Cursor::new(original.to_vec());
-    let mut archive = zip::ZipArchive::new(cursor)?;
-
-    // Collect all entries first (we need to rewrite document.xml, copy others).
-    let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
-    for i in 0..archive.len() {
-        let mut f = archive.by_index(i)?;
-        let name = f.name().to_string();
-        let mut buf = Vec::new();
-        f.read_to_end(&mut buf)?;
-        entries.push((name, buf));
-    }
-
-    let mut counts = vec![0usize; edits.len()];
-
-    for (name, bytes) in entries.iter_mut() {
-        if name == "word/document.xml" {
-            let xml = String::from_utf8_lossy(bytes).into_owned();
-            let (new_xml, hits) = patch_document_xml(&xml, edits);
-            for (i, h) in hits.iter().enumerate() {
-                counts[i] += h;
-            }
-            *bytes = new_xml.into_bytes();
-        }
-    }
-
-    let buf = Vec::new();
-    let cursor = Cursor::new(buf);
-    let mut zip = zip::ZipWriter::new(cursor);
-    let opts: zip::write::SimpleFileOptions =
-        zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for (name, bytes) in entries {
-        zip.start_file(name, opts)?;
-        zip.write_all(&bytes)?;
-    }
-    let cursor = zip.finish()?;
-    Ok((cursor.into_inner(), counts))
-}
-
-/// Apply text edits to a Word document.xml. We extract the *visible text*
-/// across `<w:t>…</w:t>` ranges, run each find/replace in order against the
-/// concatenated visible text, then write the result back as a single
-/// replacement run inside the first text element of each affected paragraph.
-///
-/// This is intentionally simple — sufficient for word-level substitutions
-/// the LLM proposes; not a structured editor for tables/numbering.
-fn patch_document_xml(xml: &str, edits: &[DocxEdit]) -> (String, Vec<usize>) {
-    let mut counts = vec![0usize; edits.len()];
-    let mut working = xml.to_string();
-
-    for (idx, ed) in edits.iter().enumerate() {
-        let needle_xml = xml_escape_static(&ed.find);
-        let replacement_xml = xml_escape_static(&ed.replace);
-        // Try literal escaped match first (exact substring already xml-escaped).
-        let mut start = 0usize;
-        let mut hits = 0usize;
-        while let Some(pos) = working[start..].find(&needle_xml) {
-            let abs = start + pos;
-            working.replace_range(abs..abs + needle_xml.len(), &replacement_xml);
-            hits += 1;
-            start = abs + replacement_xml.len();
-        }
-
-        // If literal didn't match, fall back to a tolerant search inside
-        // visible text only (concatenate <w:t> nodes, find, then patch).
-        if hits == 0 {
-            if let Some(new_xml) = tolerant_replace_in_runs(&working, &ed.find, &ed.replace) {
-                working = new_xml;
-                hits = 1;
-            }
-        }
-        counts[idx] = hits;
-    }
-    (working, counts)
-}
 
 fn xml_escape_static(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -288,70 +209,6 @@ fn xml_escape_static(s: &str) -> String {
         }
     }
     out
-}
-
-/// If literal substring fails, try to match across `<w:t>` runs. Best-effort:
-/// concatenate visible text, find first occurrence, and replace it by
-/// rewriting the affected runs (collapsing them into a single one).
-fn tolerant_replace_in_runs(xml: &str, find: &str, replace: &str) -> Option<String> {
-    let needle = find.split_whitespace().collect::<Vec<_>>().join(" ");
-    if needle.is_empty() { return None; }
-
-    // Build (start, end, text) for every <w:t> ... </w:t>
-    let mut runs: Vec<(usize, usize, String)> = Vec::new();
-    let mut search_from = 0;
-    while let Some(open) = xml[search_from..].find("<w:t") {
-        let abs_open = search_from + open;
-        // close of the opening tag
-        let after_open = xml[abs_open..].find('>').map(|p| abs_open + p + 1)?;
-        let close = xml[after_open..].find("</w:t>").map(|p| after_open + p)?;
-        let raw = &xml[after_open..close];
-        runs.push((after_open, close, html_unescape(raw)));
-        search_from = close + 6;
-    }
-
-    let combined: String = runs.iter().map(|(_, _, t)| t.clone()).collect::<Vec<_>>().join("");
-    let normalized: String = combined.split_whitespace().collect::<Vec<_>>().join(" ");
-    let pos = normalized.to_lowercase().find(&needle.to_lowercase())?;
-
-    // Map pos in normalized back to position in combined (approximate by
-    // removing one whitespace at a time until lengths align).
-    let mut combined_pos = 0usize;
-    let mut norm_walk = 0usize;
-    let mut last_was_space = false;
-    for (i, c) in combined.char_indices() {
-        if norm_walk == pos {
-            combined_pos = i;
-            break;
-        }
-        if c.is_whitespace() {
-            if !last_was_space {
-                norm_walk += 1;
-                last_was_space = true;
-            }
-        } else {
-            norm_walk += c.len_utf8();
-            last_was_space = false;
-        }
-    }
-    let _ = combined_pos; // we don't need exact byte-precision below
-
-    // Pragmatic: replace first whole run that contains a substring of the
-    // needle, write `replace` into it, and clear the others involved.
-    // Acceptable for the LLM-proposed edits which usually fit in one run.
-    let needle_lower = needle.to_lowercase();
-    for (open, close, text) in &runs {
-        if text.to_lowercase().contains(&needle_lower)
-            || (text.len() < needle.len() && needle_lower.contains(&text.to_lowercase()))
-        {
-            let mut new_xml = String::with_capacity(xml.len());
-            new_xml.push_str(&xml[..*open]);
-            new_xml.push_str(&xml_escape_static(replace));
-            new_xml.push_str(&xml[*close..]);
-            return Some(new_xml);
-        }
-    }
-    None
 }
 
 fn html_unescape(s: &str) -> String {

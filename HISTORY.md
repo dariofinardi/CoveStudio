@@ -16,6 +16,39 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.10.2 — 2026-09-24 (editing a document instead of patching its XML)
+
+`edit_document` now works on the document tree rather than on `<w:t>`
+elements.
+
+The old engine searched the XML for the text to replace. That fails on
+the most ordinary case there is: Word splits a sentence across runs
+whenever anything about it changes — a spelling correction, a language
+mark, a tracked edit — so the phrase exists in the document and in no
+single element of it. The search found nothing, rewrote the file anyway
+and reported success, and the assistant told the user the change was
+made.
+
+### Changed
+
+* Replacements run over paragraphs, tables, headers, footers and
+  footnotes, and each one reports how many times it matched.
+* A replacement keeps the formatting of the text it replaced: a bold
+  amount stays bold.
+* Opaque content — the XML the reader kept but did not model — is never
+  edited. Editing inside something we did not understand is how a
+  document stops opening.
+* When nothing matches, the tool says so and does not write: rewriting
+  the bytes and answering "done" is the failure this release removes.
+
+### Removed
+
+* The previous `apply_text_edits` in `src/pdf/docx_writer.rs`, with its
+  tolerant second pass. Two implementations of the same job eventually
+  disagree, and the one in the crate is both stricter and better tested.
+
+---
+
 ## v0.10.1 — 2026-09-24 (a Word document can be opened, and a form can be handed out)
 
 Two halves of the same job. Cove Studio could write a `.docx` and never

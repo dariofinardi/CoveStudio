@@ -98,9 +98,6 @@ impl IngestedDoc {
 /// remove, in a new hiding place.
 const SYNTHETIC_TITLES: &[&str] = &["Introduzione", "PDF (nessun testo estraibile)"];
 
-/// Title the library gives to the text before the first heading.
-const SYNTHETIC_INTRO_TITLE: &str = "Introduzione";
-
 /// Formats Cove Studio reads as plain text and the library does not
 /// know at all. `.csv` is the case that matters: the library's format
 /// detector has no entry for it, so it would come back "unsupported",
@@ -657,7 +654,7 @@ corpo");
         assert!(is_real_heading("Scadenze", p));
         // The parser's placeholders: the intro heading, and the one a
         // PDF with no text layer comes back with.
-        assert!(!is_real_heading(SYNTHETIC_INTRO_TITLE, p));
+        assert!(!is_real_heading("Introduzione", p));
         assert!(!is_real_heading("PDF (nessun testo estraibile)", p));
         // What an empty file comes back with: its own name, extension
         // included, whatever the case.
