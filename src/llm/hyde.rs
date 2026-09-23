@@ -113,6 +113,7 @@ pub async fn generate_hypothesis(
         // HyDE is one-shot — no cache benefit from chat-scoped keys.
         chat_id: None,
         mistral_opts: None,
+        response_schema: None,
     };
 
     let raw = match super::provider_for_model(target_model) {

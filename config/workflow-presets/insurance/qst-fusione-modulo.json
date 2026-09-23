@@ -1,0 +1,112 @@
+{
+  "id": "builtin-insurance-qst-fusione-modulo",
+  "title": "Questionari assuntivi — fondi in un modulo unico",
+  "type": "extraction",
+  "domain": "insurance",
+  "practice": "Broker — raccolta dati assuntivi",
+  "prompt_md": "## Obiettivo\n\nRicevi le domande estratte da **più questionari assuntivi** di compagnie diverse, ciascuna con la sigla della compagnia che la pone. Devi produrre **un solo modulo** da far compilare al cliente una volta sola, che copra tutte le compagnie.\n\nÈ questo il passo che vale: tre questionari chiedono il numero di addetti con tre formulazioni diverse, e il cliente deve rispondere una volta. Ogni campo si porta dietro l'elenco delle compagnie che lo richiedono, così dal modulo compilato si può ricostruire il questionario di ciascuna.\n\n## Fondere\n\nDue domande sono **la stessa domanda** quando chiedono lo stesso dato, anche se lo chiamano diversamente: «Numero addetti», «N. dipendenti», «Organico complessivo». Non lo sono quando cambia il perimetro: «fatturato totale» e «fatturato export» restano due campi, «addetti» e «addetti addetti alla produzione» pure.\n\nNel dubbio, **tieni separato**. Fondere due domande diverse produce una risposta che non soddisfa nessuna delle due compagnie e nessuno se ne accorge finché la compagnia non la rimanda indietro.\n\nOgni campo fuso conserva in `original_labels` la formulazione di ciascuna compagnia. È la traccia che permette di ricompilare il modulo ufficiale e di difendere una risposta se viene contestata.\n\n## Riscrivere per chi risponde\n\nIl `label` è la domanda riscritta **per l'imprenditore che la leggerà**, non per l'assuntore: niente gergo tecnico assicurativo, niente sigle non spiegate. «Retribuzioni lorde annue del personale dipendente» diventa «Totale delle retribuzioni lorde annue» con, in `help`, «la somma dei lordi annui dei dipendenti, come da modello F24 o dal consulente del lavoro».\n\nL'`help` dice **dove si trova il dato**, non cosa significa la parola: «lo trovate nella visura camerale», «è nel bilancio, voce A1 del conto economico», «lo sa il vostro RSPP». Un aiuto che ripete la domanda con altre parole non aiuta nessuno.\n\nScrivi `label` e `help` nella lingua dei questionari di origine.\n\n## Sezioni\n\nRaggruppa i campi in sezioni che seguano il ragionamento di **chi compila**, non l'ordine dei moduli delle compagnie: chi siete, cosa producete, il personale, i vostri prodotti, le coperture attuali e i sinistri passati. Dai a ogni sezione un titolo in lingua piana e una `note` di una riga che spieghi cosa serve e dove trovarlo.\n\nMetti per prime le sezioni che il cliente può compilare senza cercare nulla, per ultime quelle che richiedono di recuperare documenti.\n\n## Tipi\n\nQuando due compagnie chiedono lo stesso dato con tipi diversi, tieni il tipo **più ricco**: `currency` batte `number`, `select` con opzioni battte `text`. Se le opzioni stampate differiscono fra compagnie, unisci l'insieme delle alternative e conserva le varianti in `original_labels`.\n\n## Precompilazione\n\n`prefill` va usato **solo** quando il contesto fornito implica la risposta con certezza — per esempio «nessuno storico sinistri» per una società costituita da tre mesi, o la ragione sociale già nota. Ogni valore precompilato è marcato come dato noto e resta modificabile dal cliente.\n\nNon precompilare mai:\n\n- domande di compliance, sanzioni internazionali, procedimenti penali, indagini: richiedono una risposta consapevole di chi firma;\n- dati economici che non hai (fatturati, massimali, retribuzioni);\n- risposte che «di solito sono così».\n\nUna precompilazione sbagliata è peggio di un campo vuoto: il campo vuoto si vede, la risposta sbagliata viene firmata.\n\n## Copertura\n\nOgni domanda ricevuta in ingresso deve finire **da qualche parte**: fusa in un campo o presente come campo a sé. Alla fine, in `dropped`, elenca le domande che hai deliberatamente escluso e perché (tipicamente: istruzioni scambiate per domande, o duplicati interni allo stesso questionario). Una domanda persa in silenzio diventa un buco che emerge solo quando la compagnia rifiuta la quotazione.\n",
+  "response_schema": {
+    "type": "object",
+    "properties": {
+      "sections": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Identificatore stabile in snake_case inglese o italiano senza spazi (es. 'anagrafica', 'personale')."
+            },
+            "title": { "type": "string" },
+            "note": { "type": "string" },
+            "companies": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Sigle delle compagnie che richiedono almeno un campo di questa sezione."
+            },
+            "fields": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": { "type": "string" },
+                  "label": { "type": "string" },
+                  "help": { "type": "string" },
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "bool",
+                      "text",
+                      "textarea",
+                      "number",
+                      "currency",
+                      "percentage",
+                      "date",
+                      "select",
+                      "checkgroup",
+                      "table"
+                    ]
+                  },
+                  "options": { "type": "array", "items": { "type": "string" } },
+                  "columns": { "type": "array", "items": { "type": "string" } },
+                  "rows": { "type": "array", "items": { "type": "string" } },
+                  "unit": { "type": "string" },
+                  "has_detail": { "type": "boolean" },
+                  "detail_label": { "type": "string" },
+                  "required_by": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Compagnie che marcano questo dato come obbligatorio."
+                  },
+                  "companies": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Compagnie che chiedono questo dato."
+                  },
+                  "original_labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "company": { "type": "string" },
+                        "label": { "type": "string" },
+                        "page": { "type": "integer" }
+                      },
+                      "required": ["company", "label"]
+                    }
+                  },
+                  "prefill": {
+                    "type": "object",
+                    "properties": {
+                      "value": { "type": "string" },
+                      "because": {
+                        "type": "string",
+                        "description": "Perché il contesto implica questo valore con certezza."
+                      }
+                    },
+                    "required": ["value", "because"]
+                  }
+                },
+                "required": ["id", "label", "type", "companies"]
+              }
+            }
+          },
+          "required": ["id", "title", "fields"]
+        }
+      },
+      "dropped": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "original_label": { "type": "string" },
+            "company": { "type": "string" },
+            "why": { "type": "string" }
+          },
+          "required": ["original_label", "why"]
+        }
+      }
+    },
+    "required": ["sections"]
+  }
+}

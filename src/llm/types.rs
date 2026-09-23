@@ -231,6 +231,20 @@ pub struct StreamParams {
     /// `build_body` falls back to the Commit A hard-coded defaults
     /// (`safe_prompt: false`, `parallel_tool_calls: false`).
     pub mistral_opts: Option<MistralOpts>,
+    /// JSON Schema the answer must satisfy, when the caller needs data
+    /// rather than prose.
+    ///
+    /// Providers enforce this differently — Gemini through
+    /// `generationConfig.responseSchema`, Mistral and OpenAI-compatible
+    /// endpoints through `response_format`, Claude by forcing a tool
+    /// call — but the contract here is one: the reply is a JSON value
+    /// of this shape, or the call fails. Asking for JSON in the prompt
+    /// and hoping is what this replaces; on a hundred-field extraction
+    /// hope runs out quickly.
+    ///
+    /// `None` (the default everywhere else) leaves every provider
+    /// exactly as it was.
+    pub response_schema: Option<serde_json::Value>,
 }
 
 impl StreamParams {

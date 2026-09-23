@@ -817,6 +817,7 @@ async fn extract_cell(
         // user prompt). Could be revisited if we batch cells.
         chat_id: None,
         mistral_opts: crate::routes::chat::build_mistral_opts(model, Some(settings)),
+        response_schema: None,
     };
 
     let result = match llm::provider_for_model(model) {

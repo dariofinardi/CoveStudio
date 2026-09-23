@@ -316,6 +316,20 @@ pub(crate) fn build_body(params: &StreamParams, model: &str, stream: bool) -> se
             body["tools"] = tools;
         }
     }
+    // Structured output. `strict` makes the server reject its own
+    // model's answer if it does not match, which is the whole point:
+    // we would rather see an error than a plausible-looking object
+    // with three fields missing.
+    if let Some(schema) = &params.response_schema {
+        body["response_format"] = json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "cove_studio_result",
+                "schema": schema,
+                "strict": true,
+            }
+        });
+    }
     // The 10%-of-price cache key. Only emit when we have a chat
     // anchor — one-shot calls don't benefit and the key would be
     // wasted on unique prefixes.
@@ -496,6 +510,7 @@ mod tests {
             gemini_region: None,
             chat_id: chat_id.map(String::from),
             mistral_opts: None,
+            response_schema: None,
         }
     }
 
@@ -729,5 +744,39 @@ mod tests {
         let s = e.to_string();
         assert!(s.contains("500"));
         assert!(s.contains("internal"));
+    }
+
+    fn sample_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": { "campi": { "type": "array", "items": { "type": "string" } } },
+            "required": ["campi"]
+        })
+    }
+
+    #[test]
+    fn a_schema_becomes_a_strict_response_format() {
+        let mut p = params_with("k", "mistral-large-latest", None);
+        p.response_schema = Some(sample_schema());
+        let body = build_body(&p, "mistral-large-latest", false);
+        assert_eq!(body["response_format"]["type"], "json_schema");
+        // `strict` is the point: the server rejects its own model's
+        // answer when it does not match, instead of handing us a
+        // plausible object with fields missing.
+        assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            body["response_format"]["json_schema"]["schema"]["required"][0],
+            "campi"
+        );
+    }
+
+    #[test]
+    fn without_a_schema_no_response_format_is_sent() {
+        let body = build_body(
+            &params_with("k", "mistral-large-latest", None),
+            "mistral-large-latest",
+            false,
+        );
+        assert!(body["response_format"].is_null());
     }
 }

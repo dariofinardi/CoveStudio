@@ -40,7 +40,12 @@ pub struct WorkflowPreset {
     /// row id on the wire and by the frontend to detect built-ins.
     pub id: String,
     pub title: String,
-    /// One of `assistant` | `tabular`.
+    /// One of `assistant` | `tabular` | `extraction`.
+    ///
+    /// `extraction` presets are not offered in the chat picker: they
+    /// are steps of a pipeline, where the answer is structured data for
+    /// the next step rather than prose for a person. They carry a
+    /// `response_schema` the model's answer is constrained to.
     #[serde(rename = "type")]
     pub kind: String,
     /// Primary professional vertical — see `crate::domain::DOMAINS`.
@@ -78,6 +83,15 @@ pub struct WorkflowPreset {
     /// `generate_docx` tool. The wiring is opt-in per template.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_output_template: Option<String>,
+    /// JSON Schema the model's answer must satisfy. Required for
+    /// `extraction` presets, meaningless for the others.
+    ///
+    /// It lives here, beside the prompt, because the two are one
+    /// contract: changing what you ask for without changing the shape
+    /// you expect back is how a pipeline step starts returning
+    /// something nobody parses.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_schema: Option<Value>,
 }
 
 impl WorkflowPreset {
@@ -159,9 +173,9 @@ pub fn load_workflow_presets(dir: &Path) -> Result<Vec<WorkflowPreset>> {
                     );
                     continue;
                 }
-                if p.kind != "assistant" && p.kind != "tabular" {
+                if !matches!(p.kind.as_str(), "assistant" | "tabular" | "extraction") {
                     tracing::warn!(
-                        "[workflow-presets] skip {} (type {} not in [assistant, tabular])",
+                        "[workflow-presets] skip {} (type {} not in [assistant, tabular, extraction])",
                         path.display(),
                         p.kind
                     );
@@ -258,12 +272,87 @@ mod tests {
                 p.domain
             );
             assert!(
-                p.kind == "assistant" || p.kind == "tabular",
+                matches!(p.kind.as_str(), "assistant" | "tabular" | "extraction"),
                 "preset {} has unexpected kind {}",
                 p.id,
                 p.kind
             );
+            // An extraction preset without a schema is a prompt whose
+            // answer nobody can parse — the failure would only show up
+            // at the first run, on a real document, after paying for it.
+            if p.kind == "extraction" {
+                let schema = p
+                    .response_schema
+                    .as_ref()
+                    .unwrap_or_else(|| panic!("extraction preset {} has no response_schema", p.id));
+                assert_eq!(
+                    schema["type"], "object",
+                    "{}: the top level of a response schema must be an object",
+                    p.id
+                );
+                assert!(
+                    schema["properties"].is_object(),
+                    "{}: response schema has no properties",
+                    p.id
+                );
+                assert!(
+                    p.prompt_md.as_ref().is_some_and(|m| m.len() > 200),
+                    "{}: an extraction preset needs a prompt that says what to extract",
+                    p.id
+                );
+            }
         }
+    }
+
+    /// The three presets the insurance data-collection pipeline runs on.
+    /// Named explicitly: a rename or a lost file would otherwise only
+    /// surface when a broker runs the pipeline and gets nothing.
+    #[test]
+    fn shipped_insurance_qst_pipeline_is_complete() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("config/workflow-presets");
+        let presets = load_workflow_presets(&dir).expect("presets load");
+        for id in [
+            "builtin-insurance-qst-estrazione-domande",
+            "builtin-insurance-qst-fusione-modulo",
+            "builtin-insurance-qst-verifica-risposte",
+        ] {
+            let p = presets
+                .iter()
+                .find(|p| p.id == id)
+                .unwrap_or_else(|| panic!("missing preset {id}"));
+            assert_eq!(p.kind, "extraction", "{id}");
+            assert_eq!(p.domain, "insurance", "{id}");
+        }
+
+        // The question types the extraction may emit must be the same
+        // vocabulary the merged form uses, or the second step receives
+        // types it cannot place.
+        let types_of = |id: &str, path: &[&str]| -> Vec<String> {
+            let p = presets.iter().find(|p| p.id == id).expect("preset");
+            let mut node = p.response_schema.clone().expect("schema");
+            for step in path {
+                node = node[*step].clone();
+            }
+            node.as_array()
+                .expect("enum array")
+                .iter()
+                .map(|v| v.as_str().unwrap_or_default().to_string())
+                .collect()
+        };
+        let extracted = types_of(
+            "builtin-insurance-qst-estrazione-domande",
+            &["properties", "questions", "items", "properties", "type", "enum"],
+        );
+        let merged = types_of(
+            "builtin-insurance-qst-fusione-modulo",
+            &[
+                "properties", "sections", "items", "properties", "fields", "items",
+                "properties", "type", "enum",
+            ],
+        );
+        assert_eq!(extracted, merged, "the two steps disagree on field types");
+        assert!(extracted.contains(&"currency".to_string()));
+        assert!(extracted.contains(&"table".to_string()));
     }
 
     #[test]
@@ -278,6 +367,7 @@ mod tests {
             prompt_md: None,
             columns_config: None,
             default_output_template: None,
+            response_schema: None,
         };
         assert!(p.matches_domain(None), "no filter ⇒ always matches");
         assert!(p.matches_domain(Some("fiscale")), "primary domain matches");

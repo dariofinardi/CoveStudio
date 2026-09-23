@@ -1,0 +1,65 @@
+{
+  "id": "builtin-insurance-qst-estrazione-domande",
+  "title": "Questionario assuntivo — estrai le domande",
+  "type": "extraction",
+  "domain": "insurance",
+  "practice": "Broker — raccolta dati assuntivi",
+  "prompt_md": "## Obiettivo\n\nStai leggendo il **questionario assuntivo** (QST) di una compagnia assicurativa: il modulo che la compagnia vuole compilato prima di quotare un rischio. Il tuo compito è elencare **tutte le domande che il questionario pone al proponente**, una per voce, così come sono poste.\n\nNon stai riassumendo il documento e non stai rispondendo alle domande: stai facendo l'inventario di ciò che la compagnia chiede.\n\n## Cosa è una domanda\n\nÈ una domanda tutto ciò che richiede un dato al proponente, anche quando non ha il punto interrogativo: un campo da compilare (\"Denominazione sociale ____\"), una casella da spuntare, una riga di tabella da riempire, una richiesta di allegato.\n\nNON sono domande, e vanno esclusi:\n\n- istruzioni di compilazione, note legali, informative privacy, clausole di dichiarazione finale;\n- blocchi di firma, data e luogo, timbri;\n- testo esplicativo della copertura o delle definizioni di polizza;\n- intestazioni e numeri di modulo.\n\n## Fedeltà\n\n- `original_label` riporta il testo della domanda **come stampato**, senza riscriverlo, accorciarlo o correggerne la grammatica. È ciò che permette al broker di ritrovare la domanda sul modulo della compagnia.\n- `section_printed` riporta il titolo della sezione **come stampato sul modulo** (es. \"Sezione B — Attività\"). Se il modulo non ha sezioni, lascia vuoto: non inventarne.\n- Se una domanda si ripete identica in due punti del modulo, elencala **una volta sola** e indica la prima pagina.\n\n## Documenti bilingui\n\nAlcuni questionari stampano ogni domanda in due lingue (tipicamente italiano e inglese) affiancate o una sotto l'altra. Sono **una domanda sola**: conserva la versione italiana in `original_label` e ignora la traduzione. Elencarle due volte raddoppierebbe il modulo che il cliente dovrà compilare.\n\n## Tipo di risposta attesa\n\nScegli il tipo dalla forma del campo sul modulo, non dal contenuto della domanda:\n\n| tipo | quando |\n|---|---|\n| `bool` | casella sì/no, una coppia di caselle SI/NO |\n| `text` | riga singola da compilare |\n| `textarea` | spazio ampio per una descrizione libera |\n| `number` | conteggio senza unità monetaria (addetti, anni, unità prodotte) |\n| `currency` | importo in denaro (fatturato, massimale, retribuzioni) |\n| `percentage` | quota o percentuale |\n| `date` | data |\n| `select` | scelta fra alternative stampate, una sola |\n| `checkgroup` | elenco di voci da spuntare, più di una possibile |\n| `table` | griglia con righe e colonne da riempire |\n\nPer `select` e `checkgroup` elenca in `options` le alternative **stampate sul modulo**. Per `table` elenca le intestazioni in `columns` e, se le righe sono prestampate (es. gli ultimi 5 anni), in `rows`.\n\n## Domande con dettaglio condizionale\n\nMoltissime domande hanno la forma «Se sì, specificare ____». Non sono due domande: sono una domanda `bool` con `has_detail: true`, e in `detail_label` il testo di ciò che va specificato. Trattarle come due voci separate produce un modulo che chiede il dettaglio anche a chi ha risposto no.\n\n## Unità e obbligatorietà\n\n- `unit` solo quando il modulo la stampa (€, %, anni, m², n.).\n- `required: true` solo quando il modulo lo segnala esplicitamente (asterisco, «obbligatorio», grassetto dichiarato tale in legenda). Se non è segnalato, `false`: non dedurlo dall'importanza che attribuisci alla domanda.\n\n## Pagina\n\n`page` è il numero del marcatore `[Page N]` in cui la domanda compare. Serve al broker per tornare al punto esatto del modulo: se non riesci a determinarlo, ometti il campo invece di indovinarlo.\n\n## Quando il documento non è un questionario\n\nSe il documento allegato è una polizza, un set informativo o altro materiale che non chiede dati al proponente, restituisci `questions: []` e spiega in `document_note` di che documento si tratta. Non estrarre domande inesistenti per riempire la risposta.\n",
+  "response_schema": {
+    "type": "object",
+    "properties": {
+      "insurer": {
+        "type": "string",
+        "description": "Nome della compagnia come stampato sul modulo; vuoto se non determinabile."
+      },
+      "form_reference": {
+        "type": "string",
+        "description": "Codice ed edizione del modulo, come stampati (es. 'Mod. 2040 - Ed. 12/2019')."
+      },
+      "risk_lines": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Rami o garanzie coperti dal questionario, come stampati (es. 'RCT', 'RCO', 'RC Prodotti')."
+      },
+      "document_note": {
+        "type": "string",
+        "description": "Nota libera, usata soprattutto quando il documento non è un questionario."
+      },
+      "questions": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "original_label": { "type": "string" },
+            "section_printed": { "type": "string" },
+            "type": {
+              "type": "string",
+              "enum": [
+                "bool",
+                "text",
+                "textarea",
+                "number",
+                "currency",
+                "percentage",
+                "date",
+                "select",
+                "checkgroup",
+                "table"
+              ]
+            },
+            "options": { "type": "array", "items": { "type": "string" } },
+            "columns": { "type": "array", "items": { "type": "string" } },
+            "rows": { "type": "array", "items": { "type": "string" } },
+            "unit": { "type": "string" },
+            "has_detail": { "type": "boolean" },
+            "detail_label": { "type": "string" },
+            "required": { "type": "boolean" },
+            "page": { "type": "integer" }
+          },
+          "required": ["original_label", "type"]
+        }
+      }
+    },
+    "required": ["questions"]
+  }
+}

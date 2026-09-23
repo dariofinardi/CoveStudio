@@ -7,6 +7,7 @@ pub mod domain;
 pub mod embeddings;
 pub mod http_client;
 pub mod ingest;
+pub mod intake;
 pub mod llm;
 pub mod mcp;
 pub mod project_archive;

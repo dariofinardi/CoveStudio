@@ -539,6 +539,7 @@ async fn translate_prompt(
         // Translation is one-shot — no Mistral cache benefit.
         chat_id: None,
         mistral_opts: crate::routes::chat::build_mistral_opts(&model, Some(&settings)),
+        response_schema: None,
     };
     let translated = match llm::provider_for_model(&model) {
         llm::Provider::Claude => llm::claude::complete(params).await,

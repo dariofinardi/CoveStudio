@@ -157,6 +157,15 @@ fn thinking_config_for_model(model: &str) -> Option<Value> {
     }
 }
 
+/// The API's own word on how generation ended, when it gives one.
+fn finish_reason(response: &Value) -> Option<&str> {
+    response
+        .get("candidates")?
+        .get(0)?
+        .get("finishReason")?
+        .as_str()
+}
+
 fn build_body(params: &StreamParams) -> Value {
     let mut body = json!({ "contents": to_wire_contents(&params.messages) });
     // Stable prefix first, volatile tail last: Gemini 2.5 implicit caching
@@ -195,6 +204,24 @@ fn build_body(params: &StreamParams) -> Value {
     // tightening on the other providers without breaking Flash.
     if let Some(thinking) = thinking_config_for_model(&params.model) {
         body["generationConfig"] = json!({ "thinkingConfig": thinking });
+    }
+    // Structured output. Merged into `generationConfig` rather than
+    // assigned, so a model that also carries a thinking knob keeps it —
+    // clobbering here would silently disable thinking on exactly the
+    // calls where the answer matters most.
+    if let Some(schema) = &params.response_schema {
+        if !body["generationConfig"].is_object() {
+            body["generationConfig"] = json!({});
+        }
+        body["generationConfig"]["responseMimeType"] = json!("application/json");
+        // Without an explicit budget the default applies, and a long
+        // structured answer — a hundred questions read out of a
+        // questionnaire — is silently cut to fit it. The model still
+        // closes the JSON, so the answer parses and looks complete.
+        body["generationConfig"]["maxOutputTokens"] = json!(32768);
+        // The same subset rules as tool parameters: Gemini rejects
+        // `$ref`, `additionalProperties` and friends.
+        body["generationConfig"]["responseSchema"] = sanitize_schema_for_gemini(schema);
     }
     body
 }
@@ -722,6 +749,17 @@ pub async fn complete(params: StreamParams) -> Result<String> {
     }
 
     let v: Value = resp.json().await?;
+    if let Some(reason) = finish_reason(&v) {
+        // STOP is the only clean ending. MAX_TOKENS means the answer is
+        // cut; SAFETY and RECITATION mean it is missing content the
+        // model refused to produce. Returning any of them as a normal
+        // answer hands the caller a partial document to reason over.
+        if reason != "STOP" {
+            return Err(anyhow!(
+                "Gemini stopped early (finishReason={reason}); the answer is incomplete"
+            ));
+        }
+    }
     let text = v
         .get("candidates")
         .and_then(|c| c.get(0))
@@ -821,6 +859,7 @@ mod tests {
             gemini_region: None,
             chat_id: None,
             mistral_opts: None,
+            response_schema: None,
         }
     }
 
@@ -1134,5 +1173,75 @@ mod tests {
             }
             other => panic!("expected ContentDelta, got {other:?}"),
         }
+    }
+
+    fn sample_schema() -> serde_json::Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": { "campi": { "type": "array", "items": { "type": "string" } } },
+            "required": ["campi"]
+        })
+    }
+
+    #[test]
+    fn a_schema_becomes_response_schema_with_a_json_mime_type() {
+        let mut p = empty_params("gemini-2.5-flash");
+        p.response_schema = Some(sample_schema());
+        let body = build_body(&p);
+        assert_eq!(
+            body["generationConfig"]["responseMimeType"],
+            "application/json"
+        );
+        assert_eq!(
+            body["generationConfig"]["responseSchema"]["properties"]["campi"]["type"],
+            "array"
+        );
+    }
+
+    #[test]
+    fn a_schema_does_not_clobber_the_thinking_knob() {
+        // Both live under generationConfig; assigning instead of
+        // merging would silently disable thinking on precisely the
+        // calls where the answer matters most.
+        let mut p = empty_params("gemini-2.5-flash");
+        p.response_schema = Some(sample_schema());
+        let body = build_body(&p);
+        if thinking_config_for_model(&p.model).is_some() {
+            assert!(
+                body["generationConfig"]["thinkingConfig"].is_object(),
+                "thinking lost: {}",
+                body["generationConfig"]
+            );
+        }
+        assert!(body["generationConfig"]["responseSchema"].is_object());
+    }
+
+    #[test]
+    fn without_a_schema_nothing_changes() {
+        let body = build_body(&empty_params("gemini-2.5-flash"));
+        assert!(body["generationConfig"]["responseSchema"].is_null());
+        assert!(body["generationConfig"]["responseMimeType"].is_null());
+    }
+
+    #[test]
+    fn a_clean_ending_is_accepted_and_anything_else_is_named() {
+        let stop = serde_json::json!({"candidates":[{"finishReason":"STOP"}]});
+        assert_eq!(finish_reason(&stop), Some("STOP"));
+        let cut = serde_json::json!({"candidates":[{"finishReason":"MAX_TOKENS"}]});
+        assert_eq!(finish_reason(&cut), Some("MAX_TOKENS"));
+        // Older payloads and error shapes simply do not carry it;
+        // absence must not be read as failure.
+        assert_eq!(finish_reason(&serde_json::json!({"candidates":[{}]})), None);
+        assert_eq!(finish_reason(&serde_json::json!({})), None);
+    }
+
+    #[test]
+    fn a_schema_asks_for_room_to_answer() {
+        // The defect this guards: without an explicit budget a long
+        // structured answer is cut to the default and still parses.
+        let mut p = empty_params("gemini-3.8-flash");
+        p.response_schema = Some(sample_schema());
+        let body = build_body(&p);
+        assert!(body["generationConfig"]["maxOutputTokens"].as_u64().unwrap_or(0) >= 16384);
     }
 }

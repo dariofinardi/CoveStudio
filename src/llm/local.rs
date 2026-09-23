@@ -411,14 +411,31 @@ pub async fn complete(params: StreamParams) -> Result<String> {
     let client = reqwest::Client::new();
 
     let messages = to_wire_messages(&effective_system(&params), &params.messages);
-    let body = json!({
+    let mut body = json!({
         "model": model,
         "messages": messages,
         "stream": false,
         "think": false,
-        "max_tokens": 512,
+        // See the note in the Claude provider: a structured answer is
+        // an object, and a truncated object is invalid, not short.
+        "max_tokens": if params.response_schema.is_some() { 8192 } else { 512 },
         "temperature": 0.5,
     });
+    if let Some(schema) = &params.response_schema {
+        // OpenAI-compatible servers (including llama.cpp and vLLM) read
+        // `response_format`; Ollama reads a bare `format`. Sending both
+        // costs nothing and saves a per-backend branch we would have to
+        // keep in step with whatever the user points us at.
+        body["response_format"] = json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": "cove_studio_result",
+                "schema": schema,
+                "strict": true,
+            }
+        });
+        body["format"] = schema.clone();
+    }
 
     let resp = client
         .post(format!("{}/chat/completions", base.trim_end_matches('/')))
@@ -502,6 +519,7 @@ mod tests {
             }),
             chat_id: None,
             mistral_opts: None,
+            response_schema: None,
             claude_api_key: None,
             gemini_api_key: None,
             gemini_region: None,

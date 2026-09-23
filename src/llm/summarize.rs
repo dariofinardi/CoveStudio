@@ -234,6 +234,7 @@ pub async fn summarize_old_turns(
         // Summarisation is one-shot — no cache benefit.
         chat_id: None,
         mistral_opts: None,
+        response_schema: None,
     };
 
     let summary = match super::provider_for_model(target_model) {

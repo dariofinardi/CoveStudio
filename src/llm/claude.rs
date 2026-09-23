@@ -172,20 +172,40 @@ fn parse_claude_sse_opt(line: &str) -> Option<StreamEvent> {
     }
 }
 
+/// Name of the tool Claude is forced to call when the caller wants
+/// structured output. Never shown to the user.
+const STRUCTURED_TOOL: &str = "emit_result";
+
 pub async fn complete(params: StreamParams) -> Result<String> {
     let key = api_key(&params)?;
     let client = reqwest::Client::new();
 
     let wire_messages = to_wire_messages(&params.messages);
+    // 512 is right for a title or a one-line summary. A structured
+    // answer is a whole object — a truncated one is not "shorter", it
+    // is invalid JSON, so the budget goes up with the schema.
+    let max_tokens = if params.response_schema.is_some() { 8192 } else { 512 };
     let mut body = json!({
         "model": params.model,
-        "max_tokens": 512,
+        "max_tokens": max_tokens,
         "temperature": 0.5,
         "messages": wire_messages,
     });
     let full_system = params.full_system();
     if !full_system.is_empty() {
         body["system"] = json!(full_system);
+    }
+    // Claude has no JSON mode. The documented equivalent is a tool the
+    // model is *required* to call: its arguments are then validated
+    // against the schema by the API itself, and we read the answer out
+    // of the tool call instead of out of prose.
+    if let Some(schema) = &params.response_schema {
+        body["tools"] = json!([{
+            "name": STRUCTURED_TOOL,
+            "description": "Return the result. This is the only way to answer.",
+            "input_schema": schema,
+        }]);
+        body["tool_choice"] = json!({ "type": "tool", "name": STRUCTURED_TOOL });
     }
 
     let resp = client
@@ -206,9 +226,30 @@ pub async fn complete(params: StreamParams) -> Result<String> {
     #[derive(Deserialize)]
     struct Resp { content: Vec<ContentBlock> }
     #[derive(Deserialize)]
-    struct ContentBlock { #[serde(rename = "type")] kind: String, text: Option<String> }
+    struct ContentBlock {
+        #[serde(rename = "type")] kind: String,
+        text: Option<String>,
+        name: Option<String>,
+        input: Option<serde_json::Value>,
+    }
 
     let data: Resp = resp.json().await?;
+    // With a schema the answer lives in the forced tool call, not in
+    // prose; hand it back as JSON text so every caller reads one shape.
+    if params.response_schema.is_some() {
+        if let Some(input) = data
+            .content
+            .iter()
+            .find(|b| b.kind == "tool_use" && b.name.as_deref() == Some(STRUCTURED_TOOL))
+            .and_then(|b| b.input.clone())
+        {
+            return Ok(input.to_string());
+        }
+        return Err(anyhow!(
+            "Claude did not call the structured-output tool; \
+             the answer cannot be trusted as data"
+        ));
+    }
     Ok(data.content.into_iter()
         .filter(|b| b.kind == "text")
         .filter_map(|b| b.text)

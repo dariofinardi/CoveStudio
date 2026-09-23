@@ -16,6 +16,71 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.10.0 — 2026-09-23 (asking a model for data, and checking what comes back)
+
+Cove Studio could only ask models for prose. Everything it needed as
+data — a table cell, a list of questions read out of a form — was a
+free-text answer parsed on trust, with the expected shape written in the
+prompt and hoped for. This release adds the contract, and the checks
+that make an answer usable as data.
+
+### Added
+
+* **Structured output across every provider.** A request can carry a
+  JSON Schema; Gemini takes it as `responseSchema`, Mistral and the
+  OpenAI-compatible endpoints as a strict `response_format`, and Claude
+  — which has no JSON mode — by being forced to call a tool whose
+  arguments *are* the answer. `llm::structured::complete_json` returns a
+  parsed value or an error naming what arrived instead.
+* **`intake`**, the deterministic half of a new pipeline: read several
+  organisations' forms, merge them into one, collect the answers once.
+  It normalises what a model returns — duplicate questions, printed
+  numbering, empty labels — and judges whether an extraction is
+  plausible at all.
+* **Three insurance prompts** (`config/workflow-presets/insurance/qst-*`)
+  with the schema their answer must satisfy, for reading an underwriting
+  questionnaire, merging several into one client form with provenance
+  per insurer, and reporting what is missing or inconsistent before the
+  broker sends anything. Workflow presets accept a new `extraction`
+  kind for this.
+
+### Fixed
+
+* **The library's PDF fallback had never run.** The onboarding boundary
+  maps the parser library's configuration onto ours, except for the one
+  that mattered: the library looks for pdfium in `PAGEINDEX_PDFIUM_DIR`
+  and we ship it elsewhere, so a PDF that needed the fallback failed
+  with "pdfium cannot open the file" — which was not true, pdfium was
+  never found. An AIG questionnaire encrypted with an *empty* password
+  (readable by any viewer) was unreadable here because of it.
+* **A PDF read in part passed for a PDF read.** On a 16-page
+  questionnaire the parser returned 6.6k characters starting at page 15
+  and reported success; pdfium returned all 16 pages and 44k characters.
+  The boundary now checks how many pages the section tree accounts for
+  and re-reads with pdfium when most of the document is missing, keeping
+  whichever text is fuller.
+* **Gemini's `finishReason` was never read**, so an answer cut off at
+  the token budget came back as a complete one — well-formed, because a
+  schema makes the model close the JSON early. Structured calls now ask
+  for room (32k output tokens) and refuse anything that did not end
+  cleanly.
+
+### Notes
+
+* Measured on three real underwriting questionnaires: the same model on
+  the same document returned 118 questions on one run and 3 on the next,
+  both valid. `intake` derives a floor from the document's own text
+  (question marks, fill-in rules, label lines), retries below it, and
+  fails loudly rather than handing on a form with most of it missing.
+  When the whole-document read keeps failing it reads the document in
+  pieces instead — which is slower and slightly less complete, so it is
+  the safety net rather than the default.
+* Verified: 628 Rust tests. The live pipeline test
+  (`tests/qst_pipeline_live.rs`) is ignored by default: it needs an API
+  key and the questionnaires, which stay outside the repository.
+
+---
+
 ## v0.9.3 — 2026-09-23 (one funnel, and the verdict reaches the reader)
 
 v0.9.1 built the funnel; this release makes everything use it and makes

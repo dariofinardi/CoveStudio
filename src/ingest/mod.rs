@@ -149,6 +149,31 @@ fn defaced_warning(path: &Path) -> Option<&'static str> {
     Some(outcome::warning::TEXT_LAYER_UNRELIABLE)
 }
 
+/// How many distinct pages the section tree accounts for.
+///
+/// A paged document whose sections mention three pages out of sixteen
+/// was not read: it was sampled. The number is the basis of the
+/// coverage check below.
+pub fn pages_covered(sections: &[Section]) -> usize {
+    let mut seen: Vec<u32> = sections.iter().filter_map(|s| s.page).collect();
+    seen.sort_unstable();
+    seen.dedup();
+    seen.len()
+}
+
+/// Whether a parse looks like it lost most of the document.
+///
+/// Deliberately blunt: half the pages missing. A stricter rule would
+/// fire on legitimately sparse documents — a form with mostly empty
+/// pages, a scan interleaved with text — and a second extraction pass
+/// is not free.
+pub fn looks_truncated(page_count: Option<u32>, sections: &[Section]) -> bool {
+    match page_count {
+        Some(total) if total > 2 => (pages_covered(sections) as u32) * 2 < total,
+        _ => false,
+    }
+}
+
 /// Whether a section title is something the document carries, as
 /// opposed to a placeholder the parser supplied: the synthetic
 /// "Introduzione", or the file's own name (which is what an empty file
@@ -277,6 +302,76 @@ pub fn render_text(sections: &[Section]) -> String {
     out.trim().to_string()
 }
 
+/// Points the onboarding library at the pdfium we ship.
+///
+/// The library reads `PAGEINDEX_PDFIUM_DIR` and falls back to a path
+/// relative to the working directory; Cove Studio keeps the DLL under
+/// `libs/pdfium/<arch>/` and resolves it with its own search (installed
+/// MSI layout, dev checkout, ancestor walk). Without this bridge the
+/// library's PDF fallback silently never ran — and a PDF it could have
+/// rescued came back as "pdfium cannot open the file", which was not
+/// true: pdfium was never found, let alone asked.
+///
+/// Set once per process, and never overwriting an explicit value: an
+/// operator who set the variable deliberately outranks our guess.
+fn point_library_at_pdfium() {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| {
+        if std::env::var_os("PAGEINDEX_PDFIUM_DIR").is_some() {
+            return;
+        }
+        match crate::pdf::pdfium_dir() {
+            Some(dir) => {
+                tracing::info!("[ingest] pdfium for the parser: {}", dir.display());
+                // SAFETY: called once, before any parsing thread starts
+                // reading the variable.
+                unsafe { std::env::set_var("PAGEINDEX_PDFIUM_DIR", dir) };
+            }
+            None => {
+                // Not fatal: PDFs with a healthy text layer never need
+                // the fallback. Worth saying once, because the ones
+                // that do will fail in a way that looks like a bad file.
+                tracing::warn!(
+                    "[ingest] no pdfium found: PDFs needing the fallback \
+                     (encrypted with an empty password, damaged font tables) \
+                     will not be readable"
+                );
+            }
+        }
+    });
+}
+
+/// Re-reads a PDF with pdfium, returning sections only when the result
+/// is genuinely fuller than what we already have.
+///
+/// "Fuller" is measured in characters, not pages: a second extractor
+/// that finds every page but reads less text from them is not an
+/// improvement, and silently swapping in a worse reading would be the
+/// same defect in the opposite direction.
+#[cfg(feature = "pdf")]
+fn pdfium_sections(path: &Path, current: &[Section]) -> Option<Vec<Section>> {
+    let pages = crate::pdf::extract_text(path)
+        .map_err(|e| tracing::debug!("[ingest] pdfium re-read failed for {}: {e}", path.display()))
+        .ok()?;
+    let candidate: Vec<Section> = pages
+        .into_iter()
+        .filter(|p| !p.text.trim().is_empty())
+        .map(|p| Section {
+            level: 1,
+            title: String::new(),
+            text: p.text,
+            page: Some(p.page as u32),
+        })
+        .collect();
+    let have: usize = current.iter().map(|s| s.text.len()).sum();
+    let got: usize = candidate.iter().map(|s| s.text.len()).sum();
+    // A clear margin, not a tie-break: swapping extractors for a 5%
+    // gain would churn the text of every borderline document between
+    // runs, and stored chunks and citations would drift with it.
+    (got > have + have / 2).then_some(candidate)
+}
+
 /// Onboards a file from disk.
 ///
 /// The library's parser is synchronous and CPU-bound (a 500-page PDF
@@ -335,6 +430,7 @@ pub fn ingest_path_or_bytes(path: &Path, bytes: &[u8]) -> Result<IngestedDoc> {
 /// folder scanner walks thousands of files on one).
 pub fn ingest_blocking(path: &Path) -> Result<IngestedDoc> {
     let started_at = std::time::Instant::now();
+    point_library_at_pdfium();
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -364,6 +460,26 @@ pub fn ingest_blocking(path: &Path) -> Result<IngestedDoc> {
                     page: s.page,
                 })
                 .collect();
+            let mut sections = sections;
+            // A PDF whose section tree covers a fraction of its pages
+            // was not read, whatever the parser says. Re-read it with
+            // pdfium and keep the fuller of the two.
+            #[cfg(feature = "pdf")]
+            if matches!(format, pageindex_rs::model::InputFormat::Pdf)
+                && looks_truncated(parsed.page_count, &sections)
+            {
+                if let Some(better) = pdfium_sections(path, &sections) {
+                    tracing::warn!(
+                        "[ingest] {}: the parser covered {}/{} pages; using pdfium instead \
+                         ({} sections)",
+                        path.display(),
+                        pages_covered(&sections),
+                        parsed.page_count.unwrap_or(0),
+                        better.len(),
+                    );
+                    sections = better;
+                }
+            }
             let text = render_text(&sections);
             // What counts as content: any section body, or any heading
             // the document really carries. Both ends of that matter.

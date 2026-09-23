@@ -5,6 +5,7 @@ pub mod local;
 pub mod ollama_manager;
 pub mod mistral;
 pub mod builtin_tools;
+pub mod structured;
 pub mod summarize;
 pub mod context_window;
 pub mod hyde;
@@ -142,6 +143,7 @@ pub async fn complete_text(model: &str, system: Option<&str>, user: &str) -> Res
         gemini_region: None,
         chat_id: None,
         mistral_opts: None,
+        response_schema: None,
     };
     match provider_for_model(model) {
         Provider::Claude => claude::complete(params).await,

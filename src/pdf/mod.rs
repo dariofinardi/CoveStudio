@@ -16,6 +16,85 @@ use std::path::Path;
 #[cfg(feature = "pdf")]
 const OCR_FALLBACK_THRESHOLD: usize = 10;
 
+/// Name of the pdfium shared library on this platform.
+pub const PDFIUM_DLL_NAME: &str = if cfg!(target_os = "windows") {
+    "pdfium.dll"
+} else if cfg!(target_os = "macos") {
+    "libpdfium.dylib"
+} else {
+    "libpdfium.so"
+};
+
+/// Architecture sub-directory used by `scripts/fetch-native-libs.ps1`.
+pub const PDFIUM_ARCH_SUB: &str = if cfg!(target_arch = "aarch64") {
+    "win-arm64"
+} else {
+    "win-x64"
+};
+
+/// The directory holding the pdfium library, if one can be found.
+///
+/// Same search as [`load_pdfium`], but it answers with a path instead of
+/// a loaded library — and it works with the `pdf` feature off, because
+/// it is pure path work. The onboarding boundary needs this to tell the
+/// parser library where to look (`PAGEINDEX_PDFIUM_DIR`): without it the
+/// library's PDF fallback is never even attempted.
+pub fn pdfium_dir() -> Option<std::path::PathBuf> {
+    fn holds_library(dir: &std::path::Path) -> bool {
+        dir.join(PDFIUM_DLL_NAME).is_file()
+    }
+
+    // 1. Explicit override wins, whether it names the file or its folder.
+    if let Ok(path) = std::env::var("PDFIUM_DYNAMIC_LIB_PATH") {
+        let p = std::path::PathBuf::from(&path);
+        let dir = if p.is_file() { p.parent().map(|x| x.to_path_buf()) } else { Some(p) };
+        if let Some(d) = dir {
+            if holds_library(&d) {
+                return Some(d);
+            }
+        }
+    }
+
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|x| x.to_path_buf()));
+    let cwd = std::env::current_dir().ok();
+    let exe_resources = exe_dir.as_ref().map(|d| d.join("resources"));
+    let bases: Vec<std::path::PathBuf> = exe_dir
+        .clone()
+        .into_iter()
+        .chain(exe_resources.into_iter())
+        .chain(cwd.clone().into_iter())
+        .collect();
+
+    for base in &bases {
+        let arch = base.join("libs").join("pdfium").join(PDFIUM_ARCH_SUB);
+        if holds_library(&arch) {
+            return Some(arch);
+        }
+    }
+    for base in &bases {
+        let flat = base.join("libs").join("pdfium");
+        if holds_library(&flat) {
+            return Some(flat);
+        }
+    }
+    // Dev layout: the DLL sits further up the tree than the test binary.
+    for base in cwd.iter().chain(exe_dir.iter()) {
+        for ancestor in base.ancestors() {
+            let arch = ancestor.join("libs").join("pdfium").join(PDFIUM_ARCH_SUB);
+            if holds_library(&arch) {
+                return Some(arch);
+            }
+            let flat = ancestor.join("libs").join("pdfium");
+            if holds_library(&flat) {
+                return Some(flat);
+            }
+        }
+    }
+    None
+}
+
 /// Load pdfium from the bundled DLL in libs/pdfium/.
 ///
 /// Looks (in order):

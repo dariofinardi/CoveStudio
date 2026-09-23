@@ -1,0 +1,51 @@
+{
+  "id": "builtin-insurance-qst-verifica-risposte",
+  "title": "Risposte raccolte — verifica prima dell'invio",
+  "type": "extraction",
+  "domain": "insurance",
+  "practice": "Broker — raccolta dati assuntivi",
+  "prompt_md": "## Obiettivo\n\nRicevi il modulo compilato dal cliente e l'elenco di ciò che ciascuna compagnia richiede. Prima che il broker mandi i questionari, devi dirgli **cosa non torna**.\n\nQuesto passo esiste perché un questionario incompleto o incoerente torna indietro dalla compagnia giorni dopo, e nel frattempo la quotazione è ferma. Peggio: una dichiarazione inesatta in un questionario assuntivo può essere contestata al momento del sinistro, quando ormai non si rimedia.\n\n## Cosa segnalare\n\n**Campi scoperti.** Dati che una compagnia richiede e che il modulo non ha raccolto o che il cliente ha lasciato vuoti. Indica per ciascuno quali compagnie lo chiedono: un campo che manca solo a una delle tre è un problema diverso da uno che manca a tutte.\n\n**Risposte che sembrano segnaposto.** Una descrizione dell'attività di una parola, un «test», un «da definire», uno zero dove ci si aspetta un importo, una data palesemente finta. Non correggerle: segnalarle.\n\n**Incoerenze interne.** Una domanda con risposta «no» e il campo di dettaglio compilato lo stesso; un fatturato export maggiore del fatturato totale; «unica sede» insieme a un elenco di tre stabilimenti; nessun dipendente e un monte retribuzioni. Descrivi l'incoerenza citando entrambi i campi, senza decidere quale dei due sia sbagliato: lo sa il cliente, non tu.\n\n**Risposte che aprono una domanda successiva.** Un «sì» a «avete subito ritiri di prodotto» o a «avete procedimenti in corso» obbliga il broker a chiedere il dettaglio prima di quotare, anche quando il modulo non lo prevedeva.\n\n## Cosa NON fare\n\n- Non riscrivere le risposte del cliente, nemmeno quando sono palesemente imprecise: il questionario è una dichiarazione, e la firma è sua.\n- Non riempire un campo vuoto con un valore plausibile.\n- Non dedurre una risposta da un'altra («ha detto di esportare, quindi il fatturato estero sarà...»).\n- Non giudicare il rischio né suggerire se la quotazione sia conveniente: non è questo il compito.\n\n## Gravità\n\n- `blocking`: la compagnia non può quotare senza questo dato.\n- `check`: il dato c'è ma va confermato con il cliente prima dell'invio.\n- `note`: vale la pena saperlo, non ferma nulla.\n\nUsa `blocking` solo per ciò che una compagnia dichiara obbligatorio o che è manifestamente indispensabile alla quotazione. Se tutto è urgente, niente lo è: una lista di venti voci tutte bloccanti verrà ignorata come una lista di zero.\n",
+  "response_schema": {
+    "type": "object",
+    "properties": {
+      "ready_to_send": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Sigle delle compagnie per cui la raccolta è completa."
+      },
+      "findings": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": ["missing", "placeholder", "inconsistent", "needs_follow_up"]
+            },
+            "severity": { "type": "string", "enum": ["blocking", "check", "note"] },
+            "field_ids": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Campi coinvolti; due o più per le incoerenze."
+            },
+            "companies": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Compagnie interessate dal problema."
+            },
+            "what": {
+              "type": "string",
+              "description": "Il problema, in una frase, citando i valori così come sono stati inseriti."
+            },
+            "ask_the_client": {
+              "type": "string",
+              "description": "La domanda da girare al cliente, pronta da incollare in una mail."
+            }
+          },
+          "required": ["kind", "severity", "what"]
+        }
+      }
+    },
+    "required": ["findings"]
+  }
+}

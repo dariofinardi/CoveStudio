@@ -3428,6 +3428,7 @@ async fn run_chat_turn(turn: ChatTurn, tx: SseSender) {
             // Used by Mistral for a stable prompt_cache_key.
             chat_id: Some(chat_id.clone()),
             mistral_opts: mistral_opts.clone(),
+            response_schema: None,
         };
 
         let mut stream = match llm::stream_chat(params).await {
@@ -4848,6 +4849,7 @@ async fn post_message(
         // chat_id anyway so future-Mistral can opt-in.
         chat_id: Some(chat_id.clone()),
         mistral_opts: build_mistral_opts(&model, user_settings.as_ref()),
+        response_schema: None,
     };
 
     // SSE stream
@@ -5073,6 +5075,7 @@ async fn generate_title(
         // Title generation is one-shot — no Mistral cache benefit.
         chat_id: None,
         mistral_opts: build_mistral_opts(&title_model, user_settings.as_ref()),
+        response_schema: None,
     };
 
     let title_text = match llm::provider_for_model(&title_model) {
