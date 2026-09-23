@@ -32,12 +32,14 @@
 //! sense of reproducing a file byte for byte — see [`open`] for what is
 //! actually promised.
 
+pub mod diff;
 pub mod edit;
 pub mod model;
 pub mod parse;
 pub mod render;
 pub mod ooxml;
 
+pub use diff::{compare, Comparison};
 pub use edit::{apply_text_edits, Edit};
 pub use model::Document;
 pub use parse::{open, Opened};

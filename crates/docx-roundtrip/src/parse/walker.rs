@@ -99,19 +99,15 @@ impl<'a> Walker<'a> {
             match child.name.as_str() {
                 "w:pPr" => {}
                 "w:r" => self.run(child, None, &mut runs),
-                // A hyperlink is a container of runs. The link target
-                // itself is not modelled yet, so the runs come through and
-                // the address is lost — noted, because losing it silently
-                // would be worse.
+                // A hyperlink is kept whole rather than unwrapped. The
+                // model has no place for the address, and a document that
+                // loses its links on the first save is exactly the silent
+                // impoverishment this crate exists to prevent. The cost
+                // is that an editor cannot change the text inside a link
+                // — which is the right trade until the model carries one.
                 "w:hyperlink" => {
-                    if child.attr("r:id").is_some() {
-                        self.collected
-                            .warnings
-                            .push("a hyperlink's address is not preserved".to_string());
-                    }
-                    for r in child.children_named("w:r") {
-                        self.run(r, None, &mut runs);
-                    }
+                    let id = self.opaque(child, "w:hyperlink", true, false);
+                    runs.push(Inline::OpaqueInline { id });
                 }
                 "w:ins" | "w:del" => {
                     let revision = Revision {
@@ -603,6 +599,25 @@ mod tests {
             "a table of contents is not something we recompute: {:?}",
             runs[1]
         );
+    }
+
+    #[test]
+    fn a_hyperlink_keeps_its_address() {
+        // Unwrapping the runs would keep the words and lose the link —
+        // a document silently impoverished on every save.
+        let (blocks, collected) = walk(
+            r#"<w:body><w:p><w:hyperlink r:id="rId7"><w:r><w:t>il sito</w:t></w:r></w:hyperlink></w:p></w:body>"#,
+        );
+        let Block::Paragraph { runs, .. } = &blocks[0] else {
+            panic!("expected a paragraph");
+        };
+        let Inline::OpaqueInline { id } = &runs[0] else {
+            panic!("expected the link to be kept whole: {:?}", runs[0]);
+        };
+        let kept = &collected.opaque[id];
+        assert_eq!(kept.kind, "w:hyperlink");
+        assert!(kept.xml.contains("il sito"), "the words are still there");
+        assert!(kept.xml.contains("rId7"), "and so is the address");
     }
 
     #[test]

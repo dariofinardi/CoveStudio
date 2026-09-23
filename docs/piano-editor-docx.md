@@ -114,6 +114,43 @@ id da rinumerare. È il vantaggio di non avere una libreria di mezzo.
 Le fasi 1-7 sono il crate e non toccano Cove Studio: si possono fare e
 verificare senza rischiare nulla di ciò che già funziona.
 
+### Stato al 24/09/2026 (sessione notturna)
+
+Fatte le fasi **1-6 e 8**. Il crate apre e riscrive documenti, con 69 test
+propri più 12 di andata e ritorno; `edit_document` ci lavora sopra e il
+vecchio motore è stato rimosso (v0.10.2).
+
+Restano:
+
+* **fase 7, confronto fra versioni** — l'algoritmo è studiato (LCS sulle
+  parole, con la preferenza per la cancellazione nei pareggi, e i
+  paragrafi confrontati su posizione + testo + stile), non ancora scritto;
+* **fase 9, l'editor nell'interfaccia** — è il pezzo grosso che resta.
+
+### Cosa il crate non fa ancora, e che va saputo
+
+Ogni voce è una cosa che *si conserva* ma non si modifica, tranne dove
+indicato:
+
+* **Collegamenti ipertestuali**: conservati interi (testo e indirizzo), ma
+  non modificabili. Era l'unico punto in cui il testo passava e
+  l'indirizzo si perdeva: corretto stanotte.
+* **Immagini ancorate** (con il testo che scorre attorno): conservate
+  intere. Solo quelle in linea sono modellate.
+* **Campi diversi da numero di pagina, pagine totali e data**: TOC,
+  riferimenti incrociati, campi di unione restano conservati e non
+  ricalcolati. Deliberato: ricalcolare un indice al salvataggio cambia un
+  documento che qualcuno ha firmato.
+* **Commenti**: letti (autore, data, testo) ma le risposte non sono
+  legate al commento padre, e lo stato «risolto» non viene letto.
+* **Revisioni tracciate**: conservate con autore e data; l'id della
+  revisione viene riscritto a 1 per tutte, il che Word accetta ma non è
+  elegante.
+* **Numerazioni**: ogni elenco ottiene una definizione astratta propria in
+  scrittura. Corretto per l'uso, ma un file riscritto ha più definizioni
+  dell'originale.
+* **Font e `.dotx`**: fuori perimetro, come da §7.
+
 ## 5. Punti da decidere (per te)
 
 1. **Nome del crate**: `docx-roundtrip` è descrittivo ma non è un marchio.
@@ -162,3 +199,13 @@ verificare senza rischiare nulla di ciò che già funziona.
 5. **Font**. L'originale gestisce un catalogo di font (9 MB) per l'anteprima
    fedele. Non lo portiamo in questa fase: un documento che usa font non
    installati si vedrà con i sostituti, come già accade in Word.
+6. **Nessun documento reale è ancora passato di qui.** Tutti i test
+   costruiscono i `.docx` in memoria, il che rende la suite eseguibile
+   ovunque ma non dimostra nulla su un modello aziendale vero, che è
+   pieno di cose che nessuno prevede. Prima di usarlo su documenti di
+   clienti: aprire e riscrivere qualche modello reale, riaprirli **anche
+   con LibreOffice** (più severo di Word), e controllare il conteggio
+   degli opachi — un numero alto significa che il documento sopravvive ma
+   l'editor ne governa poco.
+7. **Il confronto fra versioni non c'è ancora**, quindi la promessa
+   «versioni con confronto» dell'originale non è ancora mantenuta.

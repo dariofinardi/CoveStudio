@@ -16,6 +16,34 @@ taken from upstream, see [`docs/UPSTREAM_SYNC.md`](docs/UPSTREAM_SYNC.md).
 
 ---
 
+## v0.10.3 — 2026-09-24 (what changed between two versions, and links that survive)
+
+### Added
+
+* **Version comparison** in `docx-roundtrip`. Not a byte diff — two saves
+  of an unchanged document differ in ways nobody wrote — but what a
+  person would compare: each paragraph's text, where it sits (`corpo`,
+  `intestazione`, `corpo/tabella r2c1`, `nota 1`) and the style it
+  carries. Unchanged paragraphs are counted and never listed, because a
+  comparison that prints the whole document to show three changes hides
+  them. A removal immediately followed by an insertion in the same place
+  is reported as **one rewrite**, with word-level detail, since that is
+  what actually happened.
+* The alignment degrades deliberately past four thousand paragraphs:
+  "everything removed, everything added" is useless, and so is an editor
+  that stops responding.
+
+### Fixed
+
+* **Hyperlinks lost their address.** The reader unwrapped `w:hyperlink`
+  into its runs, so the words survived a save and the link did not — the
+  silent impoverishment this crate exists to prevent, committed by the
+  crate itself. A link is now kept whole: its text and its target both
+  come back. The cost is that its text cannot yet be edited, which is the
+  right trade until the model carries a link of its own.
+
+---
+
 ## v0.10.2 — 2026-09-24 (editing a document instead of patching its XML)
 
 `edit_document` now works on the document tree rather than on `<w:t>`
